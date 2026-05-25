@@ -22,7 +22,7 @@ Planned extensions are documented in [docs/operation-manual.md](docs/operation-m
 - Unstructured-based parsing for PDF, Word, PPT, Markdown, TXT, images, and video-derived text.
 - LangExtract-style structured metadata extraction for authors, dates, entities, and relations.
 - Manual tags, rule tags, and AI-generated tags with review status and confidence.
-- Chunking, embedding, and vector search.
+- Chunking, embedding, and TiDB vector search.
 - MinIO for raw object storage.
 - Dify Knowledge Pipeline and Airweave adapters.
 - MCP server for AI agents.
@@ -203,7 +203,7 @@ gofmt -w cmd internal
 
 - No PDF, Word, PPT, image, or video parsing yet.
 - No chunking or embedding yet.
-- No vector search yet.
+- No TiDB vector search yet.
 - No MinIO object storage yet.
 - No manual tag review workflow yet.
 - Git repository ingestion uses a temporary shallow clone and requires local Git credentials for private repositories.

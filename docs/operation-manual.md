@@ -359,8 +359,8 @@ The intended production-grade roadmap is:
 
 - Use Unstructured for Markdown and TXT parsing through a Python worker.
 - Keep rule-based tagging.
-- Add a `VectorStore` interface.
-- Use Chroma locally only for fast validation if vector search is needed before TiDB vector storage.
+- Add chunk tables and an embedding pipeline interface.
+- Use TiDB as the only planned relation and vector storage backend. For local development, start with exact vector search without HNSW indexing so TiFlash is not required.
 
 ### Phase 2: More Sources and Metadata
 
@@ -370,8 +370,11 @@ The intended production-grade roadmap is:
 
 ### Phase 3: Search and Storage Upgrade
 
-- Prefer TiDB as unified relation and vector storage.
+- Use TiDB as unified relation and vector storage.
 - Add chunk tables and embedding tables.
+- Store embeddings in TiDB `VECTOR(D)` columns, where `D` is the embedding model dimension.
+- Use `VEC_COSINE_DISTANCE` for text semantic retrieval by default.
+- Add TiFlash replicas and HNSW vector indexes in production environments that need lower-latency approximate nearest-neighbor search.
 - Add tag-filtered search.
 - Add hybrid retrieval: keyword + tag filter + vector similarity.
 
