@@ -191,6 +191,8 @@ TIDB_PORT=4000
 TIDB_USER=root
 TIDB_DATABASE=kb
 KB_TOOL_API_TOKEN=dev-token
+KB_TOOL_MAX_FILE_BYTES=512MiB
+KB_TOOL_MAX_TEXT_BYTES=2MiB
 ```
 
 The service listens on `0.0.0.0:8080` inside the container and is published to `127.0.0.1:8080` through Docker. Because the server is externally bound, an API token is required. The browser prompts for the token on the first API request.
@@ -204,6 +206,12 @@ docker compose run --rm kb-tool search tidb
 ```
 
 The Compose service mounts the repository read-only at `/workspace`, so local paths should use `/workspace/...` when commands run in the container. The runtime image includes the Git CLI for GitHub and GitLab ingestion. Private repositories still require credentials or SSH configuration to be available inside the container.
+
+Override large-file limits for Docker runs:
+
+```bash
+KB_TOOL_MAX_FILE_BYTES=1GiB KB_TOOL_MAX_TEXT_BYTES=4MiB docker compose up -d kb-tool
+```
 
 ## 5. Configure TiDB
 
@@ -225,6 +233,8 @@ export TIDB_PORT=4000
 export TIDB_USER=root
 export TIDB_PASSWORD=
 export TIDB_DATABASE=kb
+export KB_TOOL_MAX_FILE_BYTES=512MiB
+export KB_TOOL_MAX_TEXT_BYTES=2MiB
 ```
 
 Or pass flags per command:
@@ -237,6 +247,14 @@ Or pass flags per command:
   -tidb-password "" \
   -tidb-database kb
 ```
+
+File-size settings:
+
+```bash
+./kb-tool ingest -max-file-bytes 512MiB -max-text-bytes 2MiB ./docs
+```
+
+Accepted suffixes are `KB`, `KiB`, `MB`, `MiB`, `GB`, and `GiB`. Raw byte counts are also accepted.
 
 ## 6. Initialize Schema
 
@@ -294,7 +312,14 @@ Directory ingestion walks files recursively and skips known noisy folders:
 - `build`
 - `target`
 
-Binary files and files larger than the collector limit are skipped by the CLI unless they are supported image assets. Supported image assets are stored as binary assets and previewed through the Web UI.
+Large-file and binary behavior:
+
+- The default single-file limit is `512MiB`.
+- Files above `KB_TOOL_MAX_FILE_BYTES` are skipped.
+- Text and Markdown files are read with streaming hashing; only the first `KB_TOOL_MAX_TEXT_BYTES` bytes are stored as searchable content.
+- `.docx`, `.xlsx`, and `.pptx` are parsed as Office Open XML ZIP packages. The tool extracts text from XML entries and does not store the original package bytes in TiDB.
+- `.doc`, `.xls`, and `.ppt` are recognized as legacy Office binary files and recorded as metadata-only asset documents. Full text parsing for these formats is planned through LibreOffice or Unstructured.
+- Supported image assets are stored with bytes and previewed through the Web UI.
 
 ### 7.3 Ingest a GitHub Repository
 

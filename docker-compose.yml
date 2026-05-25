@@ -12,6 +12,8 @@ services:
       TIDB_PASSWORD: ""
       TIDB_DATABASE: kb
       KB_TOOL_API_TOKEN: ${KB_TOOL_API_TOKEN:-dev-token}
+      KB_TOOL_MAX_FILE_BYTES: ${KB_TOOL_MAX_FILE_BYTES:-512MiB}
+      KB_TOOL_MAX_TEXT_BYTES: ${KB_TOOL_MAX_TEXT_BYTES:-2MiB}
     command:
       - server
       - -addr

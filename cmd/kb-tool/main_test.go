@@ -45,3 +45,34 @@ func TestParseConfigSupportsServerCommand(t *testing.T) {
 		t.Fatalf("unexpected api token: %q", cfg.APIToken)
 	}
 }
+
+func TestParseConfigSupportsLargeFileOptions(t *testing.T) {
+	cfg, err := parseConfig([]string{"ingest", "-max-file-bytes", "512MiB", "-max-text-bytes", "2MiB", "./docs"})
+	if err != nil {
+		t.Fatalf("parseConfig returned error: %v", err)
+	}
+
+	if cfg.File.MaxBytes != 512*1024*1024 {
+		t.Fatalf("unexpected max file bytes: %d", cfg.File.MaxBytes)
+	}
+	if cfg.File.MaxTextBytes != 2*1024*1024 {
+		t.Fatalf("unexpected max text bytes: %d", cfg.File.MaxTextBytes)
+	}
+}
+
+func TestParseConfigReadsLargeFileOptionsFromEnv(t *testing.T) {
+	t.Setenv("KB_TOOL_MAX_FILE_BYTES", "768MiB")
+	t.Setenv("KB_TOOL_MAX_TEXT_BYTES", "3MiB")
+
+	cfg, err := parseConfig([]string{"ingest", "./docs"})
+	if err != nil {
+		t.Fatalf("parseConfig returned error: %v", err)
+	}
+
+	if cfg.File.MaxBytes != 768*1024*1024 {
+		t.Fatalf("unexpected max file bytes: %d", cfg.File.MaxBytes)
+	}
+	if cfg.File.MaxTextBytes != 3*1024*1024 {
+		t.Fatalf("unexpected max text bytes: %d", cfg.File.MaxTextBytes)
+	}
+}

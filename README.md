@@ -125,6 +125,8 @@ The CLI reads TiDB settings from environment variables and command flags. Flags 
 | TiDB user | `TIDB_USER` | `-tidb-user` | `root` |
 | TiDB password | `TIDB_PASSWORD` | `-tidb-password` | empty |
 | TiDB database | `TIDB_DATABASE` | `-tidb-database` | `kb` |
+| Max file size | `KB_TOOL_MAX_FILE_BYTES` | `-max-file-bytes` | `512MiB` |
+| Max extracted text per document | `KB_TOOL_MAX_TEXT_BYTES` | `-max-text-bytes` | `2MiB` |
 | Search limit | none | `-limit` | `20` |
 
 Example:
@@ -146,6 +148,8 @@ The same configuration with flags:
   -tidb-user root \
   -tidb-database kb
 ```
+
+File-size values accept raw bytes or suffixes such as `KB`, `KiB`, `MB`, `MiB`, `GB`, and `GiB`.
 
 ## Commands
 
@@ -172,6 +176,20 @@ Examples:
 ./kb-tool ingest ./docs
 ./kb-tool ingest https://github.com/RenlySir/kb-tool.git
 ./kb-tool ingest git@gitlab.com:group/project.git
+```
+
+Large file behavior:
+
+- The default single-file collection limit is `512MiB`.
+- Text and Markdown files are read with streaming SHA-256 hashing; only the first `KB_TOOL_MAX_TEXT_BYTES` bytes of text are stored in `kb_documents.content`.
+- `.docx`, `.xlsx`, and `.pptx` are parsed as Office Open XML ZIP packages and text is extracted from XML entries without storing the original package bytes.
+- Legacy `.doc`, `.xls`, and `.ppt` files are recognized as Office binary assets and stored as metadata-only records for now. Full text extraction for these formats should be added through LibreOffice or Unstructured.
+- Image assets continue to store bytes for browser preview.
+
+Example for a 1GiB source limit and 4MiB text cap:
+
+```bash
+./kb-tool ingest -max-file-bytes 1GiB -max-text-bytes 4MiB ./enterprise-docs
 ```
 
 ### `search`
@@ -233,6 +251,11 @@ Image behavior:
 - Image files are stored as assets with `image/png`, `image/jpeg`, `image/gif`, or `image/webp` MIME types.
 - Images are not forced into text fields.
 - Browser preview uses an asset endpoint that returns the correct `Content-Type`, so images render visually instead of appearing as garbled binary text.
+
+Office behavior:
+
+- `.docx`, `.xlsx`, and `.pptx` files are searchable because text is extracted from their XML parts.
+- `.doc`, `.xls`, and `.ppt` files are recognized but kept as metadata-only binary asset records until an external parser is integrated.
 
 ## Schema
 
@@ -311,7 +334,7 @@ gofmt -w cmd internal
 
 ## Current Limits
 
-- No PDF, Word, PPT, or video parsing yet.
+- No PDF, old binary Office (`.doc`, `.xls`, `.ppt`), or video parsing yet.
 - No chunking or embedding yet.
 - No TiDB vector search yet.
 - No MinIO object storage yet.

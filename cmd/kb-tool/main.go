@@ -27,6 +27,7 @@ type config struct {
 	Addr     string
 	APIToken string
 	TiDB     store.Config
+	File     source.FileCollectorOptions
 }
 
 func main() {
@@ -61,7 +62,7 @@ func run(ctx context.Context, cfg config) error {
 		fmt.Println("migration complete")
 		return nil
 	case "ingest":
-		service := ingest.NewService(source.NewAutoCollector(), tagger.NewRuleBasedTagger(), kbStore)
+		service := ingest.NewService(source.NewAutoCollectorWithOptions(cfg.File), tagger.NewRuleBasedTagger(), kbStore)
 		result, err := service.Ingest(ctx, cfg.Input)
 		if err != nil {
 			return err
@@ -79,7 +80,7 @@ func run(ctx context.Context, cfg config) error {
 		}
 		return nil
 	case "server":
-		service := ingest.NewService(source.NewAutoCollector(), tagger.NewRuleBasedTagger(), kbStore)
+		service := ingest.NewService(source.NewAutoCollectorWithOptions(cfg.File), tagger.NewRuleBasedTagger(), kbStore)
 		server := web.NewServer(web.Config{APIToken: cfg.APIToken}, kbStore, web.IngesterFunc(func(ctx context.Context, input string) (web.IngestResult, error) {
 			result, err := service.Ingest(ctx, input)
 			return web.IngestResult{Documents: result.Documents, Tags: result.Tags}, err
@@ -103,6 +104,8 @@ func parseConfig(args []string) (config, error) {
 	cfg.TiDB.Database = getenv("TIDB_DATABASE", cfg.TiDB.Database)
 	cfg.TiDB.Port = getenvInt("TIDB_PORT", cfg.TiDB.Port)
 	cfg.APIToken = getenv("KB_TOOL_API_TOKEN", cfg.APIToken)
+	cfg.File.MaxBytes = getenvBytes("KB_TOOL_MAX_FILE_BYTES", source.DefaultMaxFileBytes)
+	cfg.File.MaxTextBytes = getenvBytes("KB_TOOL_MAX_TEXT_BYTES", source.DefaultMaxTextBytes)
 
 	if len(args) == 0 {
 		return cfg, errors.New("command is required")
@@ -118,6 +121,22 @@ func parseConfig(args []string) (config, error) {
 	fs.IntVar(&cfg.Limit, "limit", cfg.Limit, "search result limit")
 	fs.StringVar(&cfg.Addr, "addr", cfg.Addr, "server listen address")
 	fs.StringVar(&cfg.APIToken, "api-token", cfg.APIToken, "API bearer token")
+	fs.Func("max-file-bytes", "maximum file size to collect, for example 512MiB or 536870912", func(value string) error {
+		parsed, err := parseBytes(value)
+		if err != nil {
+			return err
+		}
+		cfg.File.MaxBytes = parsed
+		return nil
+	})
+	fs.Func("max-text-bytes", "maximum extracted text bytes stored per document, for example 2MiB", func(value string) error {
+		parsed, err := parseBytes(value)
+		if err != nil {
+			return err
+		}
+		cfg.File.MaxTextBytes = parsed
+		return nil
+	})
 	if err := fs.Parse(args[1:]); err != nil {
 		return cfg, err
 	}
@@ -169,6 +188,54 @@ func getenvInt(key string, fallback int) int {
 	return parsed
 }
 
+func getenvBytes(key string, fallback int64) int64 {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := parseBytes(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func parseBytes(raw string) (int64, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return 0, errors.New("byte size is empty")
+	}
+	lower := strings.ToLower(value)
+	multipliers := []struct {
+		suffix     string
+		multiplier int64
+	}{
+		{"mib", 1024 * 1024},
+		{"mb", 1000 * 1000},
+		{"kib", 1024},
+		{"kb", 1000},
+		{"gib", 1024 * 1024 * 1024},
+		{"gb", 1000 * 1000 * 1000},
+		{"b", 1},
+	}
+	multiplier := int64(1)
+	for _, item := range multipliers {
+		if strings.HasSuffix(lower, item.suffix) {
+			multiplier = item.multiplier
+			lower = strings.TrimSpace(strings.TrimSuffix(lower, item.suffix))
+			break
+		}
+	}
+	parsed, err := strconv.ParseInt(lower, 10, 64)
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("invalid byte size %q", raw)
+	}
+	if parsed > (1<<63-1)/multiplier {
+		return 0, fmt.Errorf("byte size %q is too large", raw)
+	}
+	return parsed * multiplier, nil
+}
+
 func usage(out *os.File) {
 	fmt.Fprintln(out, `kb-tool ingests files and Git repositories into a TiDB-backed knowledge base.
 
@@ -178,7 +245,8 @@ Usage:
   kb-tool search [flags] <query>
   kb-tool server [flags]
 
-TiDB flags can also be set with TIDB_HOST, TIDB_PORT, TIDB_USER, TIDB_PASSWORD, and TIDB_DATABASE.`)
+TiDB flags can also be set with TIDB_HOST, TIDB_PORT, TIDB_USER, TIDB_PASSWORD, and TIDB_DATABASE.
+File limits can also be set with KB_TOOL_MAX_FILE_BYTES and KB_TOOL_MAX_TEXT_BYTES.`)
 }
 
 func bindsExternally(addr string) bool {

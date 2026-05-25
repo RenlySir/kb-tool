@@ -1,11 +1,15 @@
 package source
 
 import (
+	"archive/zip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/xml"
 	"errors"
 	"fmt"
+	"hash"
+	"io"
 	"io/fs"
 	"net/url"
 	"os"
@@ -14,6 +18,11 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+)
+
+const (
+	DefaultMaxFileBytes = 512 * 1024 * 1024
+	DefaultMaxTextBytes = 2 * 1024 * 1024
 )
 
 type SourceType string
@@ -59,20 +68,26 @@ func (f CollectorFunc) Collect(ctx context.Context, input string) ([]Document, e
 
 type FileCollectorOptions struct {
 	MaxBytes      int64
+	MaxTextBytes  int64
 	IncludeBinary bool
 }
 
 type FileCollector struct {
 	maxBytes      int64
+	maxTextBytes  int64
 	includeBinary bool
 }
 
 func NewFileCollector(opts FileCollectorOptions) *FileCollector {
 	maxBytes := opts.MaxBytes
 	if maxBytes <= 0 {
-		maxBytes = 1024 * 1024
+		maxBytes = DefaultMaxFileBytes
 	}
-	return &FileCollector{maxBytes: maxBytes, includeBinary: opts.IncludeBinary}
+	maxTextBytes := opts.MaxTextBytes
+	if maxTextBytes <= 0 {
+		maxTextBytes = DefaultMaxTextBytes
+	}
+	return &FileCollector{maxBytes: maxBytes, maxTextBytes: maxTextBytes, includeBinary: opts.IncludeBinary}
 }
 
 func (c *FileCollector) Collect(path string) ([]Document, error) {
@@ -127,54 +142,62 @@ func (c *FileCollector) collectFile(root string, path string) (Document, bool, e
 	if info.Size() > c.maxBytes {
 		return Document{}, false, nil
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return Document{}, false, err
-	}
-	mimeType := mimeTypeForPath(path, data)
-	if isBinary(data) {
-		if !c.includeBinary || !isSupportedAssetMime(mimeType) {
-			return Document{}, false, nil
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil || rel == "." {
-			rel = filepath.Base(path)
-		}
-		rel = filepath.ToSlash(rel)
-		hash := sha256.Sum256(data)
-		return Document{
-			SourceType:  SourceTypeFile,
-			SourceURI:   root,
-			Path:        rel,
-			Title:       filepath.Base(path),
-			Language:    languageForPath(path),
-			ContentHash: hex.EncodeToString(hash[:]),
-			SizeBytes:   info.Size(),
-			MimeType:    mimeType,
-			IsBinary:    true,
-			Asset:       data,
-		}, true, nil
-	}
-	if strings.HasPrefix(mimeType, "image/") {
-		return Document{}, false, nil
-	}
+
 	rel, err := filepath.Rel(root, path)
 	if err != nil || rel == "." {
 		rel = filepath.Base(path)
 	}
 	rel = filepath.ToSlash(rel)
-	hash := sha256.Sum256(data)
-	return Document{
-		SourceType:  SourceTypeFile,
-		SourceURI:   root,
-		Path:        rel,
-		Title:       filepath.Base(path),
-		Language:    languageForPath(path),
-		Content:     string(data),
-		ContentHash: hex.EncodeToString(hash[:]),
-		SizeBytes:   info.Size(),
-		MimeType:    mimeType,
-	}, true, nil
+
+	base := Document{
+		SourceType: SourceTypeFile,
+		SourceURI:  root,
+		Path:       rel,
+		Title:      filepath.Base(path),
+		Language:   languageForPath(path),
+		SizeBytes:  info.Size(),
+	}
+
+	if isOfficeOpenXMLPath(path) {
+		content, digest, err := c.extractOfficeOpenXML(path)
+		if err != nil {
+			return Document{}, false, err
+		}
+		base.Content = content
+		base.ContentHash = digest
+		base.MimeType = mimeTypeForPath(path, nil)
+		return base, true, nil
+	}
+
+	sample, err := readSample(path, 8192)
+	if err != nil {
+		return Document{}, false, err
+	}
+	mimeType := mimeTypeForPath(path, sample)
+	base.MimeType = mimeType
+	if isBinary(sample) {
+		if (!c.includeBinary && !isMetadataOnlyAssetMime(mimeType)) || !isSupportedAssetMime(mimeType) {
+			return Document{}, false, nil
+		}
+		digest, asset, err := c.collectAsset(path, mimeType)
+		if err != nil {
+			return Document{}, false, err
+		}
+		base.ContentHash = digest
+		base.IsBinary = true
+		base.Asset = asset
+		return base, true, nil
+	}
+	if strings.HasPrefix(mimeType, "image/") {
+		return Document{}, false, nil
+	}
+	content, digest, err := c.readTextContent(path)
+	if err != nil {
+		return Document{}, false, err
+	}
+	base.Content = content
+	base.ContentHash = digest
+	return base, true, nil
 }
 
 type FileCollectorFunc func(path string) ([]Document, error)
@@ -280,7 +303,11 @@ type AutoCollector struct {
 }
 
 func NewAutoCollector() *AutoCollector {
-	files := NewFileCollector(FileCollectorOptions{})
+	return NewAutoCollectorWithOptions(FileCollectorOptions{})
+}
+
+func NewAutoCollectorWithOptions(opts FileCollectorOptions) *AutoCollector {
+	files := NewFileCollector(opts)
 	return &AutoCollector{
 		files: files,
 		git:   NewGitCollector(ExecCommandRunner{}, files),
@@ -382,6 +409,206 @@ func isBinary(data []byte) bool {
 	return false
 }
 
+func readSample(path string, maxBytes int64) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxBytes))
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func (c *FileCollector) readTextContent(path string) (string, string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", "", err
+	}
+	defer file.Close()
+
+	hasher := sha256.New()
+	limit := c.maxTextBytes
+	var builder strings.Builder
+	buf := make([]byte, 64*1024)
+	for {
+		n, readErr := file.Read(buf)
+		if n > 0 {
+			chunk := buf[:n]
+			if _, err := hasher.Write(chunk); err != nil {
+				return "", "", err
+			}
+			if limit > 0 {
+				remaining := limit - int64(builder.Len())
+				if remaining > 0 {
+					if int64(len(chunk)) > remaining {
+						chunk = chunk[:remaining]
+					}
+					builder.Write(chunk)
+				}
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return "", "", readErr
+		}
+	}
+	return builder.String(), digestString(hasher), nil
+}
+
+func (c *FileCollector) collectAsset(path string, mimeType string) (string, []byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", nil, err
+	}
+	defer file.Close()
+
+	hasher := sha256.New()
+	if isMetadataOnlyAssetMime(mimeType) {
+		if _, err := io.Copy(hasher, file); err != nil {
+			return "", nil, err
+		}
+		return digestString(hasher), nil, nil
+	}
+	buf := make([]byte, 64*1024)
+	out := make([]byte, 0)
+	for {
+		n, readErr := file.Read(buf)
+		if n > 0 {
+			chunk := buf[:n]
+			if _, err := hasher.Write(chunk); err != nil {
+				return "", nil, err
+			}
+			out = append(out, chunk...)
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return "", nil, readErr
+		}
+	}
+	return digestString(hasher), out, nil
+}
+
+func (c *FileCollector) extractOfficeOpenXML(path string) (string, string, error) {
+	reader, err := zip.OpenReader(path)
+	if err != nil {
+		return "", "", err
+	}
+	defer reader.Close()
+
+	hasher, err := hashFile(path)
+	if err != nil {
+		return "", "", err
+	}
+	var builder strings.Builder
+	for _, file := range reader.File {
+		if !shouldReadOfficeXML(path, file.Name) {
+			continue
+		}
+		if int64(builder.Len()) >= c.maxTextBytes {
+			break
+		}
+		if err := appendXMLText(&builder, file, c.maxTextBytes); err != nil {
+			return "", "", err
+		}
+	}
+	return strings.TrimSpace(builder.String()), hasher, nil
+}
+
+func hashFile(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, file); err != nil {
+		return "", err
+	}
+	return digestString(hasher), nil
+}
+
+func digestString(hasher hash.Hash) string {
+	return hex.EncodeToString(hasher.Sum(nil))
+}
+
+func appendXMLText(builder *strings.Builder, file *zip.File, maxTextBytes int64) error {
+	rc, err := file.Open()
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+
+	decoder := xml.NewDecoder(rc)
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		charData, ok := token.(xml.CharData)
+		if !ok {
+			continue
+		}
+		text := strings.TrimSpace(string(charData))
+		if text == "" {
+			continue
+		}
+		if builder.Len() > 0 {
+			writeLimited(builder, " ", maxTextBytes)
+		}
+		writeLimited(builder, text, maxTextBytes)
+		if int64(builder.Len()) >= maxTextBytes {
+			return nil
+		}
+	}
+}
+
+func writeLimited(builder *strings.Builder, text string, maxTextBytes int64) {
+	if maxTextBytes <= 0 {
+		return
+	}
+	remaining := maxTextBytes - int64(builder.Len())
+	if remaining <= 0 {
+		return
+	}
+	if int64(len(text)) > remaining {
+		text = text[:remaining]
+	}
+	builder.WriteString(text)
+}
+
+func isOfficeOpenXMLPath(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".docx", ".xlsx", ".pptx":
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldReadOfficeXML(path string, name string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".docx":
+		return name == "word/document.xml" || strings.HasPrefix(name, "word/header") || strings.HasPrefix(name, "word/footer")
+	case ".xlsx":
+		return name == "xl/sharedStrings.xml" || strings.HasPrefix(name, "xl/worksheets/sheet")
+	case ".pptx":
+		return strings.HasPrefix(name, "ppt/slides/slide") && strings.HasSuffix(name, ".xml")
+	default:
+		return false
+	}
+}
+
 func languageForPath(path string) string {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".go":
@@ -406,6 +633,12 @@ func languageForPath(path string) string {
 		return "shell"
 	case ".txt":
 		return "text"
+	case ".docx", ".doc":
+		return "word"
+	case ".xlsx", ".xls":
+		return "excel"
+	case ".pptx", ".ppt":
+		return "powerpoint"
 	default:
 		return strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), ".")
 	}
@@ -432,6 +665,18 @@ func mimeTypeForPath(path string, data []byte) string {
 		return "image/gif"
 	case ".webp":
 		return "image/webp"
+	case ".docx":
+		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	case ".xlsx":
+		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	case ".pptx":
+		return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+	case ".doc":
+		return "application/msword"
+	case ".xls":
+		return "application/vnd.ms-excel"
+	case ".ppt":
+		return "application/vnd.ms-powerpoint"
 	default:
 		if utf8.Valid(data) {
 			return "text/plain; charset=utf-8"
@@ -442,7 +687,23 @@ func mimeTypeForPath(path string, data []byte) string {
 
 func isSupportedAssetMime(mimeType string) bool {
 	switch mimeType {
-	case "image/png", "image/jpeg", "image/gif", "image/webp":
+	case "image/png", "image/jpeg", "image/gif", "image/webp",
+		"application/msword", "application/vnd.ms-excel", "application/vnd.ms-powerpoint",
+		"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		"application/vnd.openxmlformats-officedocument.presentationml.presentation":
+		return true
+	default:
+		return false
+	}
+}
+
+func isMetadataOnlyAssetMime(mimeType string) bool {
+	switch mimeType {
+	case "application/msword", "application/vnd.ms-excel", "application/vnd.ms-powerpoint",
+		"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		"application/vnd.openxmlformats-officedocument.presentationml.presentation":
 		return true
 	default:
 		return false
