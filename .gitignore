@@ -1,0 +1,5 @@
+/kb-tool
+/dist/
+/.DS_Store
+/.env
+/.worktrees/
