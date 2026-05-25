@@ -30,7 +30,7 @@ func TestParseConfigRequiresInputForIngest(t *testing.T) {
 }
 
 func TestParseConfigSupportsServerCommand(t *testing.T) {
-	cfg, err := parseConfig([]string{"server", "-addr", "127.0.0.1:9090", "-api-token", "secret"})
+	cfg, err := parseConfig([]string{"server", "-addr", "127.0.0.1:9090", "-api-token", "secret", "-admin-user", "root", "-admin-password", "passw0rd"})
 	if err != nil {
 		t.Fatalf("parseConfig returned error: %v", err)
 	}
@@ -43,6 +43,9 @@ func TestParseConfigSupportsServerCommand(t *testing.T) {
 	}
 	if cfg.APIToken != "secret" {
 		t.Fatalf("unexpected api token: %q", cfg.APIToken)
+	}
+	if cfg.AdminUser != "root" || cfg.AdminPassword != "passw0rd" {
+		t.Fatalf("unexpected admin credentials: %#v", cfg)
 	}
 }
 

@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"net/url"
 	"strings"
@@ -95,11 +97,12 @@ func (s *TiDBStore) Save(ctx context.Context, doc ingest.TaggedDocument) error {
 
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO kb_documents
-  (content_hash, source_type, source_uri, path, title, language, content, size_bytes, mime_type, is_binary, asset)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  (content_hash, path_hash, source_type, source_uri, path, title, language, content, size_bytes, mime_type, is_binary, asset)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON DUPLICATE KEY UPDATE
   source_type = VALUES(source_type),
   source_uri = VALUES(source_uri),
+  path = VALUES(path),
   title = VALUES(title),
   language = VALUES(language),
   content = VALUES(content),
@@ -109,6 +112,7 @@ ON DUPLICATE KEY UPDATE
   asset = VALUES(asset),
   updated_at = CURRENT_TIMESTAMP`,
 		doc.ContentHash,
+		pathHash(doc.Path),
 		doc.SourceType,
 		doc.SourceURI,
 		doc.Path,
@@ -125,7 +129,7 @@ ON DUPLICATE KEY UPDATE
 	}
 
 	var documentID int64
-	if err := tx.QueryRowContext(ctx, "SELECT id FROM kb_documents WHERE content_hash = ? AND path = ?", doc.ContentHash, doc.Path).Scan(&documentID); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT id FROM kb_documents WHERE content_hash = ? AND path_hash = ?", doc.ContentHash, pathHash(doc.Path)).Scan(&documentID); err != nil {
 		return err
 	}
 
@@ -347,6 +351,7 @@ func MigrationStatements() []string {
 		`CREATE TABLE IF NOT EXISTS kb_documents (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   content_hash CHAR(64) NOT NULL,
+  path_hash CHAR(64) NOT NULL,
   source_type VARCHAR(32) NOT NULL,
   source_uri TEXT NOT NULL,
   path VARCHAR(1024) NOT NULL,
@@ -359,7 +364,7 @@ func MigrationStatements() []string {
   asset LONGBLOB NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uk_document_hash_path (content_hash, path),
+  UNIQUE KEY uk_document_hash_path (content_hash, path_hash),
   KEY idx_source_type (source_type),
   KEY idx_language (language)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin`,
@@ -415,4 +420,9 @@ func like(query string) string {
 
 func quoteIdent(name string) string {
 	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
+}
+
+func pathHash(path string) string {
+	sum := sha256.Sum256([]byte(path))
+	return hex.EncodeToString(sum[:])
 }

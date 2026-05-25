@@ -7,37 +7,106 @@
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
-    <main class="shell">
-      <header class="topbar">
-        <div>
-          <h1>知识库工作台</h1>
-          <p>批量导入、自动打标签、浏览内容、预览图片。</p>
+    <section id="loginView" class="login-screen hidden">
+      <form id="loginForm" class="login-panel">
+        <div class="brand-lockup">
+          <span class="brand-mark">KB</span>
+          <div>
+            <h1>知识库工作台</h1>
+            <p>登录后导入数据、打标签并查看知识库内容。</p>
+          </div>
         </div>
-        <button id="refreshBtn" type="button">刷新</button>
+        <label>
+          <span>账号</span>
+          <input id="usernameInput" name="username" autocomplete="username" value="admin">
+        </label>
+        <label>
+          <span>密码</span>
+          <input id="passwordInput" name="password" type="password" autocomplete="current-password" placeholder="请输入密码">
+        </label>
+        <button id="loginBtn" type="submit">登录</button>
+        <p id="loginMessage" class="form-message"></p>
+      </form>
+    </section>
+
+    <main id="appView" class="app-shell hidden">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <span class="brand-mark">KB</span>
+          <div>
+            <h1>知识库工作台</h1>
+            <p>批量导入、打标签、检索和预览知识内容。</p>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <span id="sessionUser" class="session-user"></span>
+          <button id="refreshBtn" class="secondary" type="button">刷新</button>
+          <button id="logoutBtn" class="ghost" type="button">退出</button>
+        </div>
       </header>
 
-      <section class="layout">
-        <aside class="import-panel">
-          <h2>批量导入</h2>
-          <p>每行一个本地路径、GitHub URL 或 GitLab URL。</p>
-          <textarea id="sourceInput" spellcheck="false" placeholder="./docs&#10;https://github.com/RenlySir/kb-tool.git"></textarea>
-          <button id="ingestBtn" type="button">开始导入</button>
-          <div id="ingestResult" class="status"></div>
+      <section class="workspace">
+        <aside class="control-panel">
+          <section class="panel-section">
+            <div class="section-heading">
+              <h2>数据导入</h2>
+              <span class="count-pill">批量</span>
+            </div>
+            <label class="field">
+              <span>项目类型</span>
+              <select id="sourceType">
+                <option value="auto">自动识别</option>
+                <option value="file">本地文件/目录</option>
+                <option value="github">GitHub 仓库</option>
+                <option value="gitlab">GitLab 仓库</option>
+                <option value="office">Office 文档</option>
+                <option value="image">图片资产</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>来源列表</span>
+              <textarea id="sourceInput" spellcheck="false" placeholder="./docs&#10;https://github.com/RenlySir/kb-tool.git"></textarea>
+            </label>
+            <button id="ingestBtn" type="button">开始导入</button>
+            <div id="ingestResult" class="status-log"></div>
+          </section>
 
-          <h2>标签筛选</h2>
-          <div id="tagList" class="tag-list"></div>
+          <section class="panel-section">
+            <div class="section-heading">
+              <h2>标签操作</h2>
+              <span id="selectionSummary" class="count-pill">未选择</span>
+            </div>
+            <label class="field">
+              <span>给已选内容打标签</span>
+              <input id="batchTagInput" type="text" placeholder="例如：合同, AI, 产品手册">
+            </label>
+            <button id="batchTagBtn" type="button">批量打标签</button>
+            <div id="batchTagMessage" class="status-log compact"></div>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-heading">
+              <h2>标签筛选</h2>
+              <button id="clearTagBtn" class="text-button" type="button">清除</button>
+            </div>
+            <div id="tagList" class="tag-list"></div>
+          </section>
         </aside>
 
         <section class="document-panel">
-          <div class="toolbar">
+          <div class="list-toolbar">
             <input id="searchInput" type="search" placeholder="搜索标题、路径或正文">
-            <button id="searchBtn" type="button">搜索</button>
+            <button id="searchBtn" class="secondary" type="button">搜索</button>
+          </div>
+          <div class="list-summary">
+            <span id="documentCount">0 条内容</span>
+            <span id="activeFilter"></span>
           </div>
           <div id="documentList" class="document-list"></div>
         </section>
 
         <aside class="detail-panel">
-          <div id="detailEmpty" class="empty">选择一条知识内容查看详情。</div>
+          <div id="detailEmpty" class="empty-state">选择一条知识内容查看正文、标签和图片资产。</div>
           <article id="detailView" class="detail hidden">
             <div class="detail-heading">
               <div>
@@ -47,9 +116,9 @@
               <span id="detailType" class="type-pill"></span>
             </div>
             <div id="detailTags" class="tag-list"></div>
-            <div class="tag-editor">
+            <div class="inline-editor">
               <input id="tagInput" type="text" placeholder="添加标签，逗号分隔">
-              <button id="addTagBtn" type="button">添加</button>
+              <button id="addTagBtn" class="secondary" type="button">添加</button>
             </div>
             <div id="assetPreview" class="asset-preview"></div>
             <pre id="textPreview"></pre>

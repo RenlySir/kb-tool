@@ -20,14 +20,16 @@ import (
 )
 
 type config struct {
-	Command  string
-	Input    string
-	Query    string
-	Limit    int
-	Addr     string
-	APIToken string
-	TiDB     store.Config
-	File     source.FileCollectorOptions
+	Command       string
+	Input         string
+	Query         string
+	Limit         int
+	Addr          string
+	APIToken      string
+	AdminUser     string
+	AdminPassword string
+	TiDB          store.Config
+	File          source.FileCollectorOptions
 }
 
 func main() {
@@ -81,7 +83,11 @@ func run(ctx context.Context, cfg config) error {
 		return nil
 	case "server":
 		service := ingest.NewService(source.NewAutoCollectorWithOptions(cfg.File), tagger.NewRuleBasedTagger(), kbStore)
-		server := web.NewServer(web.Config{APIToken: cfg.APIToken}, kbStore, web.IngesterFunc(func(ctx context.Context, input string) (web.IngestResult, error) {
+		server := web.NewServer(web.Config{
+			APIToken:      cfg.APIToken,
+			AdminUser:     cfg.AdminUser,
+			AdminPassword: cfg.AdminPassword,
+		}, kbStore, web.IngesterFunc(func(ctx context.Context, input string) (web.IngestResult, error) {
 			result, err := service.Ingest(ctx, input)
 			return web.IngestResult{Documents: result.Documents, Tags: result.Tags}, err
 		}))
@@ -104,6 +110,8 @@ func parseConfig(args []string) (config, error) {
 	cfg.TiDB.Database = getenv("TIDB_DATABASE", cfg.TiDB.Database)
 	cfg.TiDB.Port = getenvInt("TIDB_PORT", cfg.TiDB.Port)
 	cfg.APIToken = getenv("KB_TOOL_API_TOKEN", cfg.APIToken)
+	cfg.AdminUser = getenv("KB_TOOL_ADMIN_USER", "admin")
+	cfg.AdminPassword = getenv("KB_TOOL_ADMIN_PASSWORD", "admin123")
 	cfg.File.MaxBytes = getenvBytes("KB_TOOL_MAX_FILE_BYTES", source.DefaultMaxFileBytes)
 	cfg.File.MaxTextBytes = getenvBytes("KB_TOOL_MAX_TEXT_BYTES", source.DefaultMaxTextBytes)
 
@@ -121,6 +129,8 @@ func parseConfig(args []string) (config, error) {
 	fs.IntVar(&cfg.Limit, "limit", cfg.Limit, "search result limit")
 	fs.StringVar(&cfg.Addr, "addr", cfg.Addr, "server listen address")
 	fs.StringVar(&cfg.APIToken, "api-token", cfg.APIToken, "API bearer token")
+	fs.StringVar(&cfg.AdminUser, "admin-user", cfg.AdminUser, "web admin username")
+	fs.StringVar(&cfg.AdminPassword, "admin-password", cfg.AdminPassword, "web admin password")
 	fs.Func("max-file-bytes", "maximum file size to collect, for example 512MiB or 536870912", func(value string) error {
 		parsed, err := parseBytes(value)
 		if err != nil {

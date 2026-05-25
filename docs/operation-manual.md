@@ -108,16 +108,20 @@ docker compose up -d kb-tool
 http://127.0.0.1:8080
 ```
 
-6. Enter the API token when prompted. The default Docker Compose token is:
+6. Log in to the Web UI. The default Docker Compose account is:
 
 ```text
-dev-token
+username: admin
+password: admin123
 ```
 
-For real use, set your own token:
+For real use, set your own API token and Web login:
 
 ```bash
-KB_TOOL_API_TOKEN=<strong-token> docker compose up -d kb-tool
+KB_TOOL_API_TOKEN=<strong-token> \
+KB_TOOL_ADMIN_USER=<user> \
+KB_TOOL_ADMIN_PASSWORD=<password> \
+docker compose up -d kb-tool
 ```
 
 ## 2. Prerequisites
@@ -191,11 +195,13 @@ TIDB_PORT=4000
 TIDB_USER=root
 TIDB_DATABASE=kb
 KB_TOOL_API_TOKEN=dev-token
+KB_TOOL_ADMIN_USER=admin
+KB_TOOL_ADMIN_PASSWORD=admin123
 KB_TOOL_MAX_FILE_BYTES=512MiB
 KB_TOOL_MAX_TEXT_BYTES=2MiB
 ```
 
-The service listens on `0.0.0.0:8080` inside the container and is published to `127.0.0.1:8080` through Docker. Because the server is externally bound, an API token is required. The browser prompts for the token on the first API request.
+The service listens on `0.0.0.0:8080` inside the container and is published to `127.0.0.1:8080` through Docker. Because the server is externally bound, an API token is required. The browser obtains that token through the configured Web login.
 
 Run CLI commands through Compose:
 
@@ -437,7 +443,7 @@ Run the same ingest command again:
 ./kb-tool ingest ./docs
 ```
 
-Documents are matched by `(content_hash, path)`. If content changes, a new content hash is generated. The current schema keeps the changed document as a new logical row when the content hash changes.
+Documents are matched by `(content_hash, path_hash)`. If content changes, a new content hash is generated. The current schema keeps the changed document as a new logical row when the content hash changes, while `path_hash` avoids oversized unique indexes for long file paths.
 
 ### Reset Local Data
 
@@ -481,7 +487,10 @@ http://127.0.0.1:8080
 When binding to a non-local address, an API token is required:
 
 ```bash
-KB_TOOL_API_TOKEN=<token> ./kb-tool server -addr 0.0.0.0:8080
+KB_TOOL_API_TOKEN=<token> \
+KB_TOOL_ADMIN_USER=admin \
+KB_TOOL_ADMIN_PASSWORD=<password> \
+./kb-tool server -addr 0.0.0.0:8080
 ```
 
 REST clients must send:
@@ -517,6 +526,16 @@ AI agents and coding tools
 
 The server reuses the same TiDB configuration flags and environment variables as `migrate`, `ingest`, and `search`.
 
+When `KB_TOOL_API_TOKEN` is configured, the Web UI uses `/api/login` for username/password login and stores the returned token in browser `localStorage` under `kbToolApiToken`. Docker Compose defaults are:
+
+```text
+username: admin
+password: admin123
+api token: dev-token
+```
+
+Change all three values before exposing the service outside a trusted local network.
+
 ### 12.2 Web UI Capabilities
 
 The Web UI is a knowledge-base workbench, not a marketing page.
@@ -524,22 +543,27 @@ The Web UI is a knowledge-base workbench, not a marketing page.
 Primary screens:
 
 - Import screen:
+  - Choose the project/source type: auto, local file/directory, GitHub, GitLab, Office document, or image asset.
   - Batch import local file paths, local directories, GitHub URLs, and GitLab URLs.
   - Accept one source per line.
   - Show import result counts for documents, tags, skipped files, and failures.
 - Document list:
   - Search by keyword.
   - Filter by tags.
+  - Select one or more documents for batch tagging.
   - Show title, path, source type, MIME type, tags, and update time.
 - Document detail:
   - Render text documents as readable text.
   - Render image documents as visible images.
   - Show source URI, path, content hash, language, MIME type, and size.
-  - Add and remove manual tags.
+  - Add manual tags to the current document.
 - Tag view:
   - List all tags.
   - Show document counts per tag.
   - Filter documents by tag.
+- Batch tag panel:
+  - Add one or more comma-separated tags to all selected documents.
+  - Reuse the same REST endpoint as external automation.
 - Planned AI tagging panel:
   - Select one or more documents.
   - Run AI tag generation.
@@ -554,12 +578,15 @@ Endpoints:
 
 ```http
 GET    /api/health
+GET    /api/session
+POST   /api/login
 GET    /api/documents
 GET    /api/documents/{id}
 GET    /api/documents/{id}/asset
 GET    /api/tags
 GET    /api/search?q=tidb&tags=database,vector
 POST   /api/ingest
+POST   /api/documents/tags
 POST   /api/documents/{id}/tags
 ```
 
@@ -569,10 +596,21 @@ Example ingest request:
 
 ```json
 {
+  "source_type": "github",
   "sources": [
-    "./docs",
     "https://github.com/RenlySir/kb-tool.git"
   ]
+}
+```
+
+Supported `source_type` values are `auto`, `file`, `github`, `gitlab`, `office`, and `image`. The server validates the obvious cases before sending each source to the collector, which helps catch selecting a GitHub project type for a local Office document.
+
+Example batch tag request:
+
+```json
+{
+  "document_ids": [1, 2, 3],
+  "tags": ["AI", "产品手册"]
 }
 ```
 
@@ -654,21 +692,25 @@ Default local mode:
 External access requires an API token:
 
 ```bash
-./kb-tool server -addr 0.0.0.0:8080 -api-token <token>
+./kb-tool server \
+  -addr 0.0.0.0:8080 \
+  -api-token <token> \
+  -admin-user admin \
+  -admin-password <password>
 ```
 
 Rules:
 
 - Binding to `127.0.0.1` is allowed without a token for local development.
 - Binding to `0.0.0.0` requires `-api-token` or `KB_TOOL_API_TOKEN`.
+- Web login uses `-admin-user` / `KB_TOOL_ADMIN_USER` and `-admin-password` / `KB_TOOL_ADMIN_PASSWORD`.
 - REST API endpoints accept:
 
 ```http
 Authorization: Bearer <token>
 ```
 
-The Web UI can reuse the same token through request headers when exposed behind an authenticated reverse proxy.
-When the built-in Web UI receives `401 Unauthorized`, it asks for the token and stores it in browser `localStorage` as `kbToolApiToken`. Image preview requests use the token only on `/api/documents/{id}/asset`, so protected image assets render as images instead of unreadable binary text.
+The Web UI obtains the API token through `/api/login` and sends it through request headers. Image preview requests use the token only on `/api/documents/{id}/asset`, so protected image assets render as images instead of unreadable binary text.
 
 ## 13. Planned LLM Connection and AI Tagging
 
@@ -934,10 +976,13 @@ Expected response:
 {"status":"ok"}
 ```
 
-If Docker Compose is used, the API token defaults to `dev-token`. Enter that token in the Web UI prompt, or set your own token before starting the service:
+If Docker Compose is used, the API token defaults to `dev-token` and the Web login defaults to `admin` / `admin123`. Set your own credentials before starting the service:
 
 ```bash
-KB_TOOL_API_TOKEN=<strong-token> docker compose up -d kb-tool
+KB_TOOL_API_TOKEN=<strong-token> \
+KB_TOOL_ADMIN_USER=<user> \
+KB_TOOL_ADMIN_PASSWORD=<password> \
+docker compose up -d kb-tool
 ```
 
 ### Image Preview Shows Broken Image

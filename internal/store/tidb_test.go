@@ -41,4 +41,13 @@ func TestMigrationStatementsCreateKnowledgeBaseTables(t *testing.T) {
 			t.Fatalf("expected migration to contain asset fragment %q in:\n%s", fragment, joined)
 		}
 	}
+	if !strings.Contains(joined, "path_hash CHAR(64)") {
+		t.Fatalf("expected migration to contain path_hash for long path indexing:\n%s", joined)
+	}
+	if !strings.Contains(joined, "UNIQUE KEY uk_document_hash_path (content_hash, path_hash)") {
+		t.Fatalf("expected migration to use path_hash in unique key:\n%s", joined)
+	}
+	if strings.Contains(joined, "UNIQUE KEY uk_document_hash_path (content_hash, path)") {
+		t.Fatalf("migration still uses path directly in unique key:\n%s", joined)
+	}
 }

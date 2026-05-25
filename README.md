@@ -12,7 +12,7 @@ The current implementation is the first usable core. It is intentionally lightwe
 - Infer a simple language value from file extension.
 - Generate stable tags from language, path, title, and content keywords.
 - Create the TiDB schema automatically.
-- Upsert documents by `(content_hash, path)` to avoid duplicates on repeated ingestion.
+- Upsert documents by `(content_hash, path_hash)` to avoid duplicates on repeated ingestion without creating oversized TiDB indexes for long paths.
 - Search document title, path, and content from the CLI.
 - Start a Web UI and REST API with `kb-tool server`.
 - Batch import sources, browse documents, add manual tags, and preview image assets from the browser.
@@ -99,10 +99,13 @@ docker compose run --rm kb-tool migrate
 docker compose up -d kb-tool
 ```
 
-Open [http://127.0.0.1:8080](http://127.0.0.1:8080). Docker Compose binds the service on `0.0.0.0:8080`, so it sets `KB_TOOL_API_TOKEN` to `dev-token` by default. The Web UI prompts for the token on the first API request. Override it for real use:
+Open [http://127.0.0.1:8080](http://127.0.0.1:8080). Docker Compose binds the service on `0.0.0.0:8080`, so it sets `KB_TOOL_API_TOKEN` to `dev-token` by default and enables Web login with `admin` / `admin123`. Override these values for real use:
 
 ```bash
-KB_TOOL_API_TOKEN=<strong-token> docker compose up -d kb-tool
+KB_TOOL_API_TOKEN=<strong-token> \
+KB_TOOL_ADMIN_USER=<user> \
+KB_TOOL_ADMIN_PASSWORD=<password> \
+docker compose up -d kb-tool
 ```
 
 Run one-off commands inside the image:
@@ -125,6 +128,9 @@ The CLI reads TiDB settings from environment variables and command flags. Flags 
 | TiDB user | `TIDB_USER` | `-tidb-user` | `root` |
 | TiDB password | `TIDB_PASSWORD` | `-tidb-password` | empty |
 | TiDB database | `TIDB_DATABASE` | `-tidb-database` | `kb` |
+| REST API token | `KB_TOOL_API_TOKEN` | `-api-token` | empty |
+| Web admin user | `KB_TOOL_ADMIN_USER` | `-admin-user` | `admin` |
+| Web admin password | `KB_TOOL_ADMIN_PASSWORD` | `-admin-password` | `admin123` |
 | Max file size | `KB_TOOL_MAX_FILE_BYTES` | `-max-file-bytes` | `512MiB` |
 | Max extracted text per document | `KB_TOOL_MAX_TEXT_BYTES` | `-max-text-bytes` | `2MiB` |
 | Search limit | none | `-limit` | `20` |
@@ -211,16 +217,43 @@ Starts the built-in Web UI and REST API from one process:
 
 Access surfaces:
 
-- Web UI: batch import local paths and Git repositories, inspect documents, edit tags, filter by tags, and preview images directly in the browser.
+- Web UI: login with an admin account, choose a source/project type, batch import local paths and Git repositories, select multiple documents, add tags in bulk, inspect documents, edit tags, filter by tags, and preview images directly in the browser.
 - REST API: external systems can ingest sources, list documents, search, read document detail, fetch image assets, and manage tags.
 
 For external binding, configure an API token:
 
 ```bash
-KB_TOOL_API_TOKEN=<token> ./kb-tool server -addr 0.0.0.0:8080
+KB_TOOL_API_TOKEN=<token> \
+KB_TOOL_ADMIN_USER=admin \
+KB_TOOL_ADMIN_PASSWORD=<password> \
+./kb-tool server -addr 0.0.0.0:8080
 ```
 
-The Web UI prompts for this token when the REST API returns `401 Unauthorized` and stores it in browser `localStorage` under `kbToolApiToken`. REST clients should send `Authorization: Bearer <token>`. Image previews use the same token through the asset endpoint so images render visually in the browser.
+The Web UI posts the configured admin username/password to `/api/login`, stores the returned token in browser `localStorage` under `kbToolApiToken`, and uses it for API calls. REST clients should send `Authorization: Bearer <token>`. Image previews use the same token through the asset endpoint so images render visually in the browser.
+
+Batch import supports an explicit `source_type` value: `auto`, `file`, `github`, `gitlab`, `office`, or `image`. The Web UI exposes this as the project type selector. The REST payload looks like:
+
+```json
+{
+  "source_type": "github",
+  "sources": ["https://github.com/RenlySir/kb-tool.git"]
+}
+```
+
+Batch tagging is available through the Web UI and REST API:
+
+```http
+POST /api/documents/tags
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+```json
+{
+  "document_ids": [1, 2, 3],
+  "tags": ["AI", "产品手册"]
+}
+```
 
 Planned MCP and LLM access:
 
@@ -265,7 +298,7 @@ The current version creates three tables:
 - `kb_tags`: normalized tag names.
 - `kb_document_tags`: many-to-many document/tag links.
 
-Documents are upserted by `(content_hash, path)`, so repeated ingestion updates existing rows instead of duplicating unchanged files.
+Documents are upserted by `(content_hash, path_hash)`, so repeated ingestion updates existing rows instead of duplicating unchanged files while avoiding oversized unique indexes for very long paths.
 
 ## Architecture
 
