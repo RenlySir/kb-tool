@@ -21,7 +21,7 @@ Planned extensions are documented in [docs/operation-manual.md](docs/operation-m
 
 - Unstructured-based parsing for PDF, Word, PPT, Markdown, TXT, images, and video-derived text.
 - LangExtract-style structured metadata extraction for authors, dates, entities, and relations.
-- Manual tags, rule tags, and AI-generated tags with review status and confidence.
+- Manual tags, rule tags, and LLM-generated AI tags with review status, confidence, and evidence.
 - Chunking, embedding, and TiDB vector search.
 - MinIO for raw object storage.
 - Dify Knowledge Pipeline and Airweave adapters.
@@ -155,7 +155,27 @@ Planned access surfaces:
 
 - Web UI: batch import local paths and Git repositories, inspect documents, edit tags, filter by tags, and preview images directly in the browser.
 - REST API: external systems can ingest sources, list documents, search, read document detail, fetch image assets, and manage tags.
-- MCP tools: AI agents can call `search_knowledge`, `get_document`, `list_documents`, `list_tags`, `ingest_source`, and `add_document_tags`.
+- MCP tools: AI agents can call `search_knowledge`, `get_document`, `list_documents`, `list_tags`, `ingest_source`, `generate_document_tags`, and `add_document_tags`.
+- LLM tagger: connect to OpenAI-compatible APIs, Ollama, or an internal model gateway to generate tags from document text and metadata.
+
+Planned LLM configuration:
+
+```bash
+KB_TOOL_LLM_PROVIDER=openai-compatible
+KB_TOOL_LLM_BASE_URL=https://api.openai.com/v1
+KB_TOOL_LLM_API_KEY=<token>
+KB_TOOL_LLM_MODEL=gpt-4.1-mini
+```
+
+For local models:
+
+```bash
+KB_TOOL_LLM_PROVIDER=ollama
+KB_TOOL_LLM_BASE_URL=http://127.0.0.1:11434
+KB_TOOL_LLM_MODEL=qwen2.5:7b
+```
+
+AI tag output should be stored with source, confidence, and evidence so humans can review or reject model-generated labels.
 
 Planned image behavior:
 
@@ -212,6 +232,11 @@ Main packages:
 - `internal/ingest`: orchestration of collect, tag, migrate, and save.
 - `internal/store`: TiDB schema, upsert, tag linking, and search.
 
+Planned packages:
+
+- `internal/llm`: provider abstraction for OpenAI-compatible APIs, Ollama, and internal model gateways.
+- `internal/aitagger`: prompt construction, JSON tag parsing, confidence/evidence handling, and review-state defaults.
+
 ## Development
 
 Run tests:
@@ -240,6 +265,7 @@ gofmt -w cmd internal
 - No MinIO object storage yet.
 - No Web UI, REST API, or MCP server yet.
 - No browser image preview endpoint yet.
+- No LLM connection or AI tagger yet.
 - No manual tag review workflow yet.
 - Git repository ingestion uses a temporary shallow clone and requires local Git credentials for private repositories.
 

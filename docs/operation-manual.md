@@ -345,6 +345,11 @@ Primary screens:
   - List all tags.
   - Show document counts per tag.
   - Filter documents by tag.
+- AI tagging panel:
+  - Select one or more documents.
+  - Run AI tag generation.
+  - Show generated tags with confidence and evidence.
+  - Allow users to approve, reject, or edit generated tags before final use.
 
 ### 12.3 REST API
 
@@ -404,6 +409,7 @@ Tools:
 - `list_documents`: list recent or filtered documents.
 - `list_tags`: list tags and counts.
 - `ingest_source`: ingest a local path or Git URL.
+- `generate_document_tags`: call the configured LLM provider and return proposed tags with confidence and evidence.
 - `add_document_tags`: add manual tags to a document.
 - `get_document_asset_info`: return asset MIME type, size, and fetch URL for images or binary files.
 
@@ -467,7 +473,195 @@ Authorization: Bearer <token>
 
 The Web UI can reuse the same token through a local settings panel or request header.
 
-## 13. Troubleshooting
+## 13. Planned LLM Connection and AI Tagging
+
+This section describes the planned LLM integration for AI-assisted tagging. It is not implemented in the current CLI-only release.
+
+### 13.1 Goals
+
+The AI tagger should add intelligent tags without replacing deterministic rule tags or human review.
+
+Required behavior:
+
+- Connect to different model providers through a stable provider interface.
+- Generate tags from document text, source metadata, existing rule tags, and optional extracted entities.
+- Return structured JSON instead of free-form prose.
+- Store every AI-generated tag assignment with source, model, confidence, evidence, and review status.
+- Let users approve, reject, or edit model-generated tags from Web UI or API.
+
+### 13.2 Provider Types
+
+The planned provider abstraction should support:
+
+- OpenAI-compatible APIs:
+  - OpenAI
+  - TiDB Cloud AI gateway if exposed through an OpenAI-compatible endpoint
+  - Internal enterprise LLM gateways
+  - Any service exposing `/v1/chat/completions`
+- Ollama:
+  - Local models for private/offline tagging
+  - Example models: Qwen, Llama, Gemma
+- Future providers:
+  - Native SDK integrations
+  - Batch tagging services
+  - Fine-tuned classification endpoints
+
+### 13.3 Configuration
+
+Environment variables:
+
+```bash
+export KB_TOOL_LLM_PROVIDER=openai-compatible
+export KB_TOOL_LLM_BASE_URL=https://api.openai.com/v1
+export KB_TOOL_LLM_API_KEY=<token>
+export KB_TOOL_LLM_MODEL=gpt-4.1-mini
+export KB_TOOL_LLM_TIMEOUT_SECONDS=60
+```
+
+Local Ollama example:
+
+```bash
+export KB_TOOL_LLM_PROVIDER=ollama
+export KB_TOOL_LLM_BASE_URL=http://127.0.0.1:11434
+export KB_TOOL_LLM_MODEL=qwen2.5:7b
+```
+
+Planned server flags:
+
+```bash
+./kb-tool server \
+  -llm-provider openai-compatible \
+  -llm-base-url https://api.openai.com/v1 \
+  -llm-model gpt-4.1-mini
+```
+
+The API key should come from `KB_TOOL_LLM_API_KEY` or a secret manager, not from command history.
+
+### 13.4 AI Tagging Request
+
+The AI tagger should receive a compact input:
+
+```json
+{
+  "document": {
+    "id": 123,
+    "title": "TiDB Vector Search Notes",
+    "path": "docs/tidb-vector.md",
+    "source_type": "file",
+    "mime_type": "text/markdown",
+    "language": "markdown"
+  },
+  "text": "shortened document or selected chunks",
+  "existing_tags": ["tidb", "database"],
+  "metadata": {
+    "author": "optional",
+    "created_at": "optional"
+  }
+}
+```
+
+The prompt should ask the model to produce concise, normalized tags and evidence. It should avoid sending full oversized documents when selected chunks are enough.
+
+### 13.5 AI Tagging Response
+
+The model response must be parsed as JSON:
+
+```json
+{
+  "tags": [
+    {
+      "name": "vector-search",
+      "confidence": 0.92,
+      "evidence": "The document explains VECTOR(D), VEC_COSINE_DISTANCE, and HNSW indexes.",
+      "category": "technical-topic"
+    }
+  ]
+}
+```
+
+Tag assignments should be stored with:
+
+```text
+source = ai
+review_status = pending
+confidence = model confidence or calibrated score
+evidence = short model-provided explanation
+model = configured model name
+provider = configured provider name
+```
+
+Human-approved AI tags can later move to:
+
+```text
+review_status = approved
+```
+
+### 13.6 API and MCP Surface
+
+Planned REST endpoint:
+
+```http
+POST /api/documents/{id}/tags/generate
+```
+
+Request:
+
+```json
+{
+  "mode": "ai",
+  "max_tags": 8,
+  "review_status": "pending"
+}
+```
+
+Response:
+
+```json
+{
+  "document_id": 123,
+  "provider": "openai-compatible",
+  "model": "gpt-4.1-mini",
+  "tags": [
+    {
+      "name": "vector-search",
+      "confidence": 0.92,
+      "evidence": "Mentions TiDB VECTOR and cosine distance.",
+      "review_status": "pending"
+    }
+  ]
+}
+```
+
+Planned MCP tool:
+
+```text
+generate_document_tags
+```
+
+Inputs:
+
+```json
+{
+  "document_id": 123,
+  "max_tags": 8
+}
+```
+
+Outputs should mirror the REST response.
+
+### 13.7 Security and Privacy
+
+Rules:
+
+- Do not log `KB_TOOL_LLM_API_KEY`.
+- Do not store model API keys in TiDB.
+- Redact API keys from errors and debug output.
+- Allow AI tagging to be disabled by default in production.
+- Prefer sending chunks or summaries instead of entire sensitive documents.
+- Record which provider and model generated each tag for auditability.
+- If external LLM calls are not allowed, use an internal OpenAI-compatible gateway or Ollama.
+
+## 14. Troubleshooting
 
 ### `connection refused`
 
@@ -523,7 +717,7 @@ SELECT id, path, title FROM kb_documents ORDER BY updated_at DESC LIMIT 10;
 
 Then search for a term visible in `title`, `path`, or `content`.
 
-## 14. Recommended Expansion Plan
+## 15. Recommended Expansion Plan
 
 The intended production-grade roadmap is:
 
@@ -538,7 +732,7 @@ The intended production-grade roadmap is:
 
 - Add GitHub API ingestion for README files and code comments.
 - Add LangExtract-style structured extraction for authors, dates, entities, and relations.
-- Add AI-generated tags with confidence and evidence.
+- Add LLM-generated AI tags with confidence, evidence, provider name, model name, and pending review status.
 
 ### Phase 3: Search and Storage Upgrade
 
@@ -556,11 +750,12 @@ The intended production-grade roadmap is:
 - Add Web UI for batch import, tag editing, document browsing, and image preview.
 - Add REST API for external systems to ingest, search, read, and tag knowledge-base content.
 - Add MCP server mode for AI agents such as Cursor and Claude Code.
+- Add OpenAI-compatible and Ollama LLM providers for AI tagging and metadata enrichment.
 - Add CocoIndex-style incremental indexing and lineage.
 - Add OpenTagging/MetaLabel-style tag lifecycle management.
 - Add Dify Knowledge Pipeline and Airweave adapters.
 
-## 15. Operational Checklist
+## 16. Operational Checklist
 
 For a fresh local run:
 
