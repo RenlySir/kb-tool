@@ -5,6 +5,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -14,14 +16,17 @@ import (
 	"github.com/RenlySir/kb-tool/internal/source"
 	"github.com/RenlySir/kb-tool/internal/store"
 	"github.com/RenlySir/kb-tool/internal/tagger"
+	"github.com/RenlySir/kb-tool/internal/web"
 )
 
 type config struct {
-	Command string
-	Input   string
-	Query   string
-	Limit   int
-	TiDB    store.Config
+	Command  string
+	Input    string
+	Query    string
+	Limit    int
+	Addr     string
+	APIToken string
+	TiDB     store.Config
 }
 
 func main() {
@@ -73,6 +78,14 @@ func run(ctx context.Context, cfg config) error {
 			fmt.Printf("    %s\n", strings.ReplaceAll(result.Snippet, "\n", " "))
 		}
 		return nil
+	case "server":
+		service := ingest.NewService(source.NewAutoCollector(), tagger.NewRuleBasedTagger(), kbStore)
+		server := web.NewServer(web.Config{APIToken: cfg.APIToken}, kbStore, web.IngesterFunc(func(ctx context.Context, input string) (web.IngestResult, error) {
+			result, err := service.Ingest(ctx, input)
+			return web.IngestResult{Documents: result.Documents, Tags: result.Tags}, err
+		}))
+		fmt.Printf("kb-tool web server listening on http://%s\n", cfg.Addr)
+		return http.ListenAndServe(cfg.Addr, server)
 	default:
 		return fmt.Errorf("unknown command %q", cfg.Command)
 	}
@@ -82,12 +95,14 @@ func parseConfig(args []string) (config, error) {
 	cfg := config{
 		TiDB:  store.DefaultConfig(),
 		Limit: 20,
+		Addr:  "127.0.0.1:8080",
 	}
 	cfg.TiDB.Host = getenv("TIDB_HOST", cfg.TiDB.Host)
 	cfg.TiDB.User = getenv("TIDB_USER", cfg.TiDB.User)
 	cfg.TiDB.Password = getenv("TIDB_PASSWORD", cfg.TiDB.Password)
 	cfg.TiDB.Database = getenv("TIDB_DATABASE", cfg.TiDB.Database)
 	cfg.TiDB.Port = getenvInt("TIDB_PORT", cfg.TiDB.Port)
+	cfg.APIToken = getenv("KB_TOOL_API_TOKEN", cfg.APIToken)
 
 	if len(args) == 0 {
 		return cfg, errors.New("command is required")
@@ -101,6 +116,8 @@ func parseConfig(args []string) (config, error) {
 	fs.StringVar(&cfg.TiDB.Password, "tidb-password", cfg.TiDB.Password, "TiDB password")
 	fs.StringVar(&cfg.TiDB.Database, "tidb-database", cfg.TiDB.Database, "TiDB database")
 	fs.IntVar(&cfg.Limit, "limit", cfg.Limit, "search result limit")
+	fs.StringVar(&cfg.Addr, "addr", cfg.Addr, "server listen address")
+	fs.StringVar(&cfg.APIToken, "api-token", cfg.APIToken, "API bearer token")
 	if err := fs.Parse(args[1:]); err != nil {
 		return cfg, err
 	}
@@ -119,6 +136,13 @@ func parseConfig(args []string) (config, error) {
 	case "migrate":
 		if fs.NArg() > 0 {
 			return cfg, errors.New("migrate does not accept positional arguments")
+		}
+	case "server":
+		if fs.NArg() > 0 {
+			return cfg, errors.New("server does not accept positional arguments")
+		}
+		if bindsExternally(cfg.Addr) && cfg.APIToken == "" {
+			return cfg, errors.New("api-token is required when binding server to a non-local address")
 		}
 	default:
 		return cfg, fmt.Errorf("unknown command %q", cfg.Command)
@@ -152,6 +176,15 @@ Usage:
   kb-tool migrate [flags]
   kb-tool ingest [flags] <file|directory|github-url|gitlab-url>
   kb-tool search [flags] <query>
+  kb-tool server [flags]
 
 TiDB flags can also be set with TIDB_HOST, TIDB_PORT, TIDB_USER, TIDB_PASSWORD, and TIDB_DATABASE.`)
+}
+
+func bindsExternally(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	return host == "" || host == "0.0.0.0" || host == "::"
 }

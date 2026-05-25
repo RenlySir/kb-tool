@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>kb-tool 知识库工作台</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>知识库工作台</h1>
+          <p>批量导入、自动打标签、浏览内容、预览图片。</p>
+        </div>
+        <button id="refreshBtn" type="button">刷新</button>
+      </header>
+
+      <section class="layout">
+        <aside class="import-panel">
+          <h2>批量导入</h2>
+          <p>每行一个本地路径、GitHub URL 或 GitLab URL。</p>
+          <textarea id="sourceInput" spellcheck="false" placeholder="./docs&#10;https://github.com/RenlySir/kb-tool.git"></textarea>
+          <button id="ingestBtn" type="button">开始导入</button>
+          <div id="ingestResult" class="status"></div>
+
+          <h2>标签筛选</h2>
+          <div id="tagList" class="tag-list"></div>
+        </aside>
+
+        <section class="document-panel">
+          <div class="toolbar">
+            <input id="searchInput" type="search" placeholder="搜索标题、路径或正文">
+            <button id="searchBtn" type="button">搜索</button>
+          </div>
+          <div id="documentList" class="document-list"></div>
+        </section>
+
+        <aside class="detail-panel">
+          <div id="detailEmpty" class="empty">选择一条知识内容查看详情。</div>
+          <article id="detailView" class="detail hidden">
+            <div class="detail-heading">
+              <div>
+                <h2 id="detailTitle"></h2>
+                <p id="detailPath"></p>
+              </div>
+              <span id="detailType" class="type-pill"></span>
+            </div>
+            <div id="detailTags" class="tag-list"></div>
+            <div class="tag-editor">
+              <input id="tagInput" type="text" placeholder="添加标签，逗号分隔">
+              <button id="addTagBtn" type="button">添加</button>
+            </div>
+            <div id="assetPreview" class="asset-preview"></div>
+            <pre id="textPreview"></pre>
+          </article>
+        </aside>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

@@ -28,3 +28,20 @@ func TestParseConfigRequiresInputForIngest(t *testing.T) {
 		t.Fatalf("expected input error, got %v", err)
 	}
 }
+
+func TestParseConfigSupportsServerCommand(t *testing.T) {
+	cfg, err := parseConfig([]string{"server", "-addr", "127.0.0.1:9090", "-api-token", "secret"})
+	if err != nil {
+		t.Fatalf("parseConfig returned error: %v", err)
+	}
+
+	if cfg.Command != "server" {
+		t.Fatalf("expected server command, got %q", cfg.Command)
+	}
+	if cfg.Addr != "127.0.0.1:9090" {
+		t.Fatalf("unexpected addr: %q", cfg.Addr)
+	}
+	if cfg.APIToken != "secret" {
+		t.Fatalf("unexpected api token: %q", cfg.APIToken)
+	}
+}

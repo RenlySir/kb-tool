@@ -42,6 +42,9 @@ type Document struct {
 	Content     string
 	ContentHash string
 	SizeBytes   int64
+	MimeType    string
+	IsBinary    bool
+	Asset       []byte
 }
 
 type Collector interface {
@@ -55,11 +58,13 @@ func (f CollectorFunc) Collect(ctx context.Context, input string) ([]Document, e
 }
 
 type FileCollectorOptions struct {
-	MaxBytes int64
+	MaxBytes      int64
+	IncludeBinary bool
 }
 
 type FileCollector struct {
-	maxBytes int64
+	maxBytes      int64
+	includeBinary bool
 }
 
 func NewFileCollector(opts FileCollectorOptions) *FileCollector {
@@ -67,7 +72,7 @@ func NewFileCollector(opts FileCollectorOptions) *FileCollector {
 	if maxBytes <= 0 {
 		maxBytes = 1024 * 1024
 	}
-	return &FileCollector{maxBytes: maxBytes}
+	return &FileCollector{maxBytes: maxBytes, includeBinary: opts.IncludeBinary}
 }
 
 func (c *FileCollector) Collect(path string) ([]Document, error) {
@@ -126,7 +131,31 @@ func (c *FileCollector) collectFile(root string, path string) (Document, bool, e
 	if err != nil {
 		return Document{}, false, err
 	}
+	mimeType := mimeTypeForPath(path, data)
 	if isBinary(data) {
+		if !c.includeBinary || !isSupportedAssetMime(mimeType) {
+			return Document{}, false, nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil || rel == "." {
+			rel = filepath.Base(path)
+		}
+		rel = filepath.ToSlash(rel)
+		hash := sha256.Sum256(data)
+		return Document{
+			SourceType:  SourceTypeFile,
+			SourceURI:   root,
+			Path:        rel,
+			Title:       filepath.Base(path),
+			Language:    languageForPath(path),
+			ContentHash: hex.EncodeToString(hash[:]),
+			SizeBytes:   info.Size(),
+			MimeType:    mimeType,
+			IsBinary:    true,
+			Asset:       data,
+		}, true, nil
+	}
+	if strings.HasPrefix(mimeType, "image/") {
 		return Document{}, false, nil
 	}
 	rel, err := filepath.Rel(root, path)
@@ -144,6 +173,7 @@ func (c *FileCollector) collectFile(root string, path string) (Document, bool, e
 		Content:     string(data),
 		ContentHash: hex.EncodeToString(hash[:]),
 		SizeBytes:   info.Size(),
+		MimeType:    mimeType,
 	}, true, nil
 }
 
@@ -378,5 +408,43 @@ func languageForPath(path string) string {
 		return "text"
 	default:
 		return strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), ".")
+	}
+}
+
+func mimeTypeForPath(path string, data []byte) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".md", ".markdown":
+		return "text/markdown; charset=utf-8"
+	case ".txt":
+		return "text/plain; charset=utf-8"
+	case ".go":
+		return "text/x-go; charset=utf-8"
+	case ".json":
+		return "application/json"
+	case ".yaml", ".yml":
+		return "application/yaml"
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	default:
+		if utf8.Valid(data) {
+			return "text/plain; charset=utf-8"
+		}
+		return "application/octet-stream"
+	}
+}
+
+func isSupportedAssetMime(mimeType string) bool {
+	switch mimeType {
+	case "image/png", "image/jpeg", "image/gif", "image/webp":
+		return true
+	default:
+		return false
 	}
 }

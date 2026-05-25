@@ -36,4 +36,9 @@ func TestMigrationStatementsCreateKnowledgeBaseTables(t *testing.T) {
 			t.Fatalf("expected migration to contain %q in:\n%s", fragment, joined)
 		}
 	}
+	for _, fragment := range []string{"mime_type", "is_binary", "asset LONGBLOB"} {
+		if !strings.Contains(joined, fragment) {
+			t.Fatalf("expected migration to contain asset fragment %q in:\n%s", fragment, joined)
+		}
+	}
 }

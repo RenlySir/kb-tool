@@ -4,7 +4,7 @@ This manual explains how to install, configure, run, verify, and troubleshoot `k
 
 ## 1. System Overview
 
-`kb-tool` ingests content into a TiDB-backed knowledge base. The current release supports local text files, local directories, GitHub repository URLs, and GitLab repository URLs.
+`kb-tool` ingests content into a TiDB-backed knowledge base. The current release supports local text files, local image assets, local directories, GitHub repository URLs, and GitLab repository URLs.
 
 The runtime flow is:
 
@@ -16,8 +16,65 @@ source input
   → upsert documents
   → upsert tags
   → link documents and tags
-  → search with CLI
+  → search with CLI or Web UI
 ```
+
+## Correct Usage Steps
+
+Use this sequence for a fresh local setup:
+
+1. Start TiDB:
+
+```bash
+docker compose up -d tidb
+```
+
+2. Build the binary:
+
+```bash
+go build ./cmd/kb-tool
+```
+
+3. Initialize the schema:
+
+```bash
+./kb-tool migrate
+```
+
+4. Ingest content from CLI or Web UI:
+
+```bash
+./kb-tool ingest ./README.md
+./kb-tool ingest ./docs
+./kb-tool ingest https://github.com/RenlySir/kb-tool.git
+```
+
+5. Search from CLI:
+
+```bash
+./kb-tool search tidb
+```
+
+6. Start the Web UI:
+
+```bash
+./kb-tool server -addr 127.0.0.1:8080
+```
+
+7. Open the workbench:
+
+```text
+http://127.0.0.1:8080
+```
+
+8. In the browser:
+
+- Paste multiple sources into the import panel, one per line.
+- Click `开始导入`.
+- Search or filter the document list.
+- Select a document to inspect text, tags, and metadata.
+- Add manual tags with comma-separated input.
+- Select image documents to view them as images instead of binary text.
 
 ## 2. Prerequisites
 
@@ -118,6 +175,8 @@ The command creates the database if needed and then creates these tables:
 - `kb_tags`
 - `kb_document_tags`
 
+`kb_documents` includes text fields plus MIME type, binary marker, and optional asset bytes for image preview.
+
 ## 7. Ingest Content
 
 ### 7.1 Ingest One File
@@ -152,7 +211,7 @@ Directory ingestion walks files recursively and skips known noisy folders:
 - `build`
 - `target`
 
-Binary files and files larger than the collector limit are skipped.
+Binary files and files larger than the collector limit are skipped by the CLI unless they are supported image assets. Supported image assets are stored as binary assets and previewed through the Web UI.
 
 ### 7.3 Ingest a GitHub Repository
 
@@ -226,6 +285,8 @@ Examples of generated tags:
 
 Repeated ingestion recalculates tags and replaces the existing tag links for each document.
 
+Manual tags added from Web UI or REST API are appended to the existing document/tag links.
+
 ## 10. Verify Data in TiDB
 
 Connect to TiDB with any MySQL-compatible client:
@@ -295,19 +356,45 @@ Then run:
   -tidb-database kb
 ```
 
-## 12. Planned Web UI, REST API, and MCP Access
-
-This section describes the planned `server` mode. It is not implemented in the current CLI-only release.
-
-### 12.1 Server Mode
-
-The planned command is:
+### Start the Web UI
 
 ```bash
 ./kb-tool server -addr 127.0.0.1:8080
 ```
 
-One process should expose three access surfaces:
+Then open:
+
+```text
+http://127.0.0.1:8080
+```
+
+### Bind Web UI for External Access
+
+When binding to a non-local address, an API token is required:
+
+```bash
+KB_TOOL_API_TOKEN=<token> ./kb-tool server -addr 0.0.0.0:8080
+```
+
+REST clients must send:
+
+```http
+Authorization: Bearer <token>
+```
+
+## 12. Web UI, REST API, and Planned MCP Access
+
+This section describes the current Web UI and REST API, plus the planned MCP surface.
+
+### 12.1 Server Mode
+
+The command is:
+
+```bash
+./kb-tool server -addr 127.0.0.1:8080
+```
+
+One process exposes Web UI and REST API now, with MCP planned:
 
 ```text
 browser users
@@ -317,14 +404,14 @@ external systems
   → REST API
 
 AI agents and coding tools
-  → MCP tools
+  → MCP tools (planned)
 ```
 
-The server should reuse the same TiDB configuration flags and environment variables as `migrate`, `ingest`, and `search`.
+The server reuses the same TiDB configuration flags and environment variables as `migrate`, `ingest`, and `search`.
 
 ### 12.2 Web UI Capabilities
 
-The Web UI should be a knowledge-base workbench, not a marketing page.
+The Web UI is a knowledge-base workbench, not a marketing page.
 
 Primary screens:
 
@@ -345,7 +432,7 @@ Primary screens:
   - List all tags.
   - Show document counts per tag.
   - Filter documents by tag.
-- AI tagging panel:
+- Planned AI tagging panel:
   - Select one or more documents.
   - Run AI tag generation.
   - Show generated tags with confidence and evidence.
@@ -353,7 +440,7 @@ Primary screens:
 
 ### 12.3 REST API
 
-The planned REST API should support external systems and automation.
+The REST API supports external systems and automation.
 
 Endpoints:
 
@@ -366,8 +453,9 @@ GET    /api/tags
 GET    /api/search?q=tidb&tags=database,vector
 POST   /api/ingest
 POST   /api/documents/{id}/tags
-DELETE /api/documents/{id}/tags/{tag}
 ```
+
+`DELETE /api/documents/{id}/tags/{tag}` is planned and not implemented yet.
 
 Example ingest request:
 
@@ -398,7 +486,7 @@ Example search response:
 }
 ```
 
-### 12.4 MCP Tools
+### 12.4 Planned MCP Tools
 
 The planned MCP surface should let AI agents access the knowledge base without scraping the Web UI.
 
@@ -417,12 +505,12 @@ Image assets should not be embedded as garbled text in MCP results. MCP should r
 
 ### 12.5 Image and Binary Asset Handling
 
-The current CLI skips binary files. The planned server release should support image ingestion and visual preview.
+The current release supports image ingestion and visual preview for common image MIME types.
 
 Storage rules:
 
 - Text content goes into text fields for search and display.
-- Image bytes are stored as an asset, initially in TiDB `LONGBLOB` or later in MinIO.
+- Image bytes are stored as an asset in TiDB `LONGBLOB`. A future release can move raw assets to MinIO.
 - TiDB stores metadata such as MIME type, size, hash, path, source URI, and tags.
 - Non-image binary files are tracked as assets but not rendered as text.
 
@@ -455,7 +543,7 @@ Default local mode:
 ./kb-tool server -addr 127.0.0.1:8080
 ```
 
-External access should require an API token:
+External access requires an API token:
 
 ```bash
 ./kb-tool server -addr 0.0.0.0:8080 -api-token <token>
@@ -464,14 +552,14 @@ External access should require an API token:
 Rules:
 
 - Binding to `127.0.0.1` is allowed without a token for local development.
-- Binding to `0.0.0.0` should require `-api-token` or `KB_TOOL_API_TOKEN`.
-- REST API and MCP endpoints should accept:
+- Binding to `0.0.0.0` requires `-api-token` or `KB_TOOL_API_TOKEN`.
+- REST API endpoints accept:
 
 ```http
 Authorization: Bearer <token>
 ```
 
-The Web UI can reuse the same token through a local settings panel or request header.
+The Web UI can reuse the same token through request headers when exposed behind an authenticated reverse proxy.
 
 ## 13. Planned LLM Connection and AI Tagging
 
@@ -717,6 +805,43 @@ SELECT id, path, title FROM kb_documents ORDER BY updated_at DESC LIMIT 10;
 
 Then search for a term visible in `title`, `path`, or `content`.
 
+### Web UI Cannot Connect to API
+
+Check the server is running:
+
+```bash
+./kb-tool server -addr 127.0.0.1:8080
+```
+
+Open:
+
+```text
+http://127.0.0.1:8080/api/health
+```
+
+Expected response:
+
+```json
+{"status":"ok"}
+```
+
+### Image Preview Shows Broken Image
+
+Confirm the document is an image asset:
+
+```sql
+SELECT id, path, mime_type, is_binary, size_bytes
+FROM kb_documents
+WHERE id = <document_id>;
+```
+
+Supported preview MIME types:
+
+- `image/png`
+- `image/jpeg`
+- `image/gif`
+- `image/webp`
+
 ## 15. Recommended Expansion Plan
 
 The intended production-grade roadmap is:
@@ -747,8 +872,6 @@ The intended production-grade roadmap is:
 ### Phase 4: Production Extensions
 
 - Add MinIO object storage for raw files and extracted artifacts.
-- Add Web UI for batch import, tag editing, document browsing, and image preview.
-- Add REST API for external systems to ingest, search, read, and tag knowledge-base content.
 - Add MCP server mode for AI agents such as Cursor and Claude Code.
 - Add OpenAI-compatible and Ollama LLM providers for AI tagging and metadata enrichment.
 - Add CocoIndex-style incremental indexing and lineage.

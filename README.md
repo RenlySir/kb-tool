@@ -1,6 +1,6 @@
 # kb-tool
 
-`kb-tool` is a Go command-line tool for building a small TiDB-backed knowledge base from local files, directories, GitHub repositories, and GitLab repositories. It collects text content, generates deterministic rule-based tags, stores documents and tag mappings in TiDB, and provides a CLI search command.
+`kb-tool` is a Go tool for building a small TiDB-backed knowledge base from local files, directories, GitHub repositories, and GitLab repositories. It collects content, generates deterministic rule-based tags, stores documents and tag mappings in TiDB, provides CLI search, and includes a built-in Web UI for batch import and browsing.
 
 The current implementation is the first usable core. It is intentionally lightweight: TiDB is the storage backend, Git is used for repository ingestion, and the tagger is rule based so the tool works offline. The architecture leaves room for later Unstructured parsing, AI metadata extraction, embeddings, MinIO, Dify, Airweave, and MCP integrations.
 
@@ -14,6 +14,8 @@ The current implementation is the first usable core. It is intentionally lightwe
 - Create the TiDB schema automatically.
 - Upsert documents by `(content_hash, path)` to avoid duplicates on repeated ingestion.
 - Search document title, path, and content from the CLI.
+- Start a Web UI and REST API with `kb-tool server`.
+- Batch import sources, browse documents, add manual tags, and preview image assets from the browser.
 
 ## Roadmap
 
@@ -25,8 +27,6 @@ Planned extensions are documented in [docs/operation-manual.md](docs/operation-m
 - Chunking, embedding, and TiDB vector search.
 - MinIO for raw object storage.
 - Dify Knowledge Pipeline and Airweave adapters.
-- Web UI for batch import, tag editing, knowledge-base browsing, and image preview.
-- REST API for external systems to query and ingest knowledge.
 - MCP server for AI agents.
 
 ## Requirements
@@ -73,6 +73,14 @@ Search:
 ```bash
 ./kb-tool search tidb
 ```
+
+Start the Web UI:
+
+```bash
+./kb-tool server -addr 127.0.0.1:8080
+```
+
+Open [http://127.0.0.1:8080](http://127.0.0.1:8080).
 
 ## Configuration
 
@@ -143,20 +151,29 @@ Searches title, path, and content with a SQL `LIKE` query and prints matching sn
 ./kb-tool search -limit 5 tidb
 ```
 
-### Planned `server`
+### `server`
 
-The next major mode will expose the knowledge base through Web UI, REST API, and MCP from one process:
+Starts the built-in Web UI and REST API from one process:
 
 ```bash
 ./kb-tool server -addr 127.0.0.1:8080
 ```
 
-Planned access surfaces:
+Access surfaces:
 
 - Web UI: batch import local paths and Git repositories, inspect documents, edit tags, filter by tags, and preview images directly in the browser.
 - REST API: external systems can ingest sources, list documents, search, read document detail, fetch image assets, and manage tags.
-- MCP tools: AI agents can call `search_knowledge`, `get_document`, `list_documents`, `list_tags`, `ingest_source`, `generate_document_tags`, and `add_document_tags`.
-- LLM tagger: connect to OpenAI-compatible APIs, Ollama, or an internal model gateway to generate tags from document text and metadata.
+
+For external binding, configure an API token:
+
+```bash
+KB_TOOL_API_TOKEN=<token> ./kb-tool server -addr 0.0.0.0:8080
+```
+
+Planned MCP and LLM access:
+
+- MCP tools will let AI agents call `search_knowledge`, `get_document`, `list_documents`, `list_tags`, `ingest_source`, `generate_document_tags`, and `add_document_tags`.
+- The LLM tagger will connect to OpenAI-compatible APIs, Ollama, or an internal model gateway to generate tags from document text and metadata.
 
 Planned LLM configuration:
 
@@ -177,7 +194,7 @@ KB_TOOL_LLM_MODEL=qwen2.5:7b
 
 AI tag output should be stored with source, confidence, and evidence so humans can review or reject model-generated labels.
 
-Planned image behavior:
+Image behavior:
 
 - Image files are stored as assets with `image/png`, `image/jpeg`, `image/gif`, or `image/webp` MIME types.
 - Images are not forced into text fields.
@@ -187,7 +204,7 @@ Planned image behavior:
 
 The current version creates three tables:
 
-- `kb_documents`: document metadata and full text.
+- `kb_documents`: document metadata, full text, MIME type, binary marker, and optional asset bytes.
 - `kb_tags`: normalized tag names.
 - `kb_document_tags`: many-to-many document/tag links.
 
@@ -213,7 +230,7 @@ TiDB store
 CLI search
 ```
 
-Planned server architecture:
+Server architecture:
 
 ```text
 Browser Web UI ─┐
@@ -231,6 +248,7 @@ Main packages:
 - `internal/tagger`: deterministic rule-based tag generator.
 - `internal/ingest`: orchestration of collect, tag, migrate, and save.
 - `internal/store`: TiDB schema, upsert, tag linking, and search.
+- `internal/web`: Web UI static assets, REST API, batch ingest endpoint, document/tag API, and image asset endpoint.
 
 Planned packages:
 
@@ -259,12 +277,11 @@ gofmt -w cmd internal
 
 ## Current Limits
 
-- No PDF, Word, PPT, image, or video parsing yet.
+- No PDF, Word, PPT, or video parsing yet.
 - No chunking or embedding yet.
 - No TiDB vector search yet.
 - No MinIO object storage yet.
-- No Web UI, REST API, or MCP server yet.
-- No browser image preview endpoint yet.
+- No MCP server yet.
 - No LLM connection or AI tagger yet.
 - No manual tag review workflow yet.
 - Git repository ingestion uses a temporary shallow clone and requires local Git credentials for private repositories.
