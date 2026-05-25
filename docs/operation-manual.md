@@ -295,7 +295,179 @@ Then run:
   -tidb-database kb
 ```
 
-## 12. Troubleshooting
+## 12. Planned Web UI, REST API, and MCP Access
+
+This section describes the planned `server` mode. It is not implemented in the current CLI-only release.
+
+### 12.1 Server Mode
+
+The planned command is:
+
+```bash
+./kb-tool server -addr 127.0.0.1:8080
+```
+
+One process should expose three access surfaces:
+
+```text
+browser users
+  → Web UI
+
+external systems
+  → REST API
+
+AI agents and coding tools
+  → MCP tools
+```
+
+The server should reuse the same TiDB configuration flags and environment variables as `migrate`, `ingest`, and `search`.
+
+### 12.2 Web UI Capabilities
+
+The Web UI should be a knowledge-base workbench, not a marketing page.
+
+Primary screens:
+
+- Import screen:
+  - Batch import local file paths, local directories, GitHub URLs, and GitLab URLs.
+  - Accept one source per line.
+  - Show import result counts for documents, tags, skipped files, and failures.
+- Document list:
+  - Search by keyword.
+  - Filter by tags.
+  - Show title, path, source type, MIME type, tags, and update time.
+- Document detail:
+  - Render text documents as readable text.
+  - Render image documents as visible images.
+  - Show source URI, path, content hash, language, MIME type, and size.
+  - Add and remove manual tags.
+- Tag view:
+  - List all tags.
+  - Show document counts per tag.
+  - Filter documents by tag.
+
+### 12.3 REST API
+
+The planned REST API should support external systems and automation.
+
+Endpoints:
+
+```http
+GET    /api/health
+GET    /api/documents
+GET    /api/documents/{id}
+GET    /api/documents/{id}/asset
+GET    /api/tags
+GET    /api/search?q=tidb&tags=database,vector
+POST   /api/ingest
+POST   /api/documents/{id}/tags
+DELETE /api/documents/{id}/tags/{tag}
+```
+
+Example ingest request:
+
+```json
+{
+  "sources": [
+    "./docs",
+    "https://github.com/RenlySir/kb-tool.git"
+  ]
+}
+```
+
+Example search response:
+
+```json
+{
+  "results": [
+    {
+      "id": 1,
+      "title": "README.md",
+      "path": "README.md",
+      "source_type": "file",
+      "mime_type": "text/markdown",
+      "tags": ["documentation", "knowledge-base"],
+      "snippet": "kb-tool is a Go command-line tool..."
+    }
+  ]
+}
+```
+
+### 12.4 MCP Tools
+
+The planned MCP surface should let AI agents access the knowledge base without scraping the Web UI.
+
+Tools:
+
+- `search_knowledge`: keyword or hybrid search with optional tag filters.
+- `get_document`: fetch document detail and text content.
+- `list_documents`: list recent or filtered documents.
+- `list_tags`: list tags and counts.
+- `ingest_source`: ingest a local path or Git URL.
+- `add_document_tags`: add manual tags to a document.
+- `get_document_asset_info`: return asset MIME type, size, and fetch URL for images or binary files.
+
+Image assets should not be embedded as garbled text in MCP results. MCP should return metadata and an asset URL so clients can fetch or preview the image appropriately.
+
+### 12.5 Image and Binary Asset Handling
+
+The current CLI skips binary files. The planned server release should support image ingestion and visual preview.
+
+Storage rules:
+
+- Text content goes into text fields for search and display.
+- Image bytes are stored as an asset, initially in TiDB `LONGBLOB` or later in MinIO.
+- TiDB stores metadata such as MIME type, size, hash, path, source URI, and tags.
+- Non-image binary files are tracked as assets but not rendered as text.
+
+Preview rules:
+
+```http
+GET /api/documents/{id}/asset
+```
+
+For an image, the response should include:
+
+```http
+Content-Type: image/png
+Content-Disposition: inline
+```
+
+The Web UI should render it with:
+
+```html
+<img src="/api/documents/123/asset" alt="document image preview">
+```
+
+This prevents image bytes from being displayed as unreadable text.
+
+### 12.6 Access Control
+
+Default local mode:
+
+```bash
+./kb-tool server -addr 127.0.0.1:8080
+```
+
+External access should require an API token:
+
+```bash
+./kb-tool server -addr 0.0.0.0:8080 -api-token <token>
+```
+
+Rules:
+
+- Binding to `127.0.0.1` is allowed without a token for local development.
+- Binding to `0.0.0.0` should require `-api-token` or `KB_TOOL_API_TOKEN`.
+- REST API and MCP endpoints should accept:
+
+```http
+Authorization: Bearer <token>
+```
+
+The Web UI can reuse the same token through a local settings panel or request header.
+
+## 13. Troubleshooting
 
 ### `connection refused`
 
@@ -351,7 +523,7 @@ SELECT id, path, title FROM kb_documents ORDER BY updated_at DESC LIMIT 10;
 
 Then search for a term visible in `title`, `path`, or `content`.
 
-## 13. Recommended Expansion Plan
+## 14. Recommended Expansion Plan
 
 The intended production-grade roadmap is:
 
@@ -381,12 +553,14 @@ The intended production-grade roadmap is:
 ### Phase 4: Production Extensions
 
 - Add MinIO object storage for raw files and extracted artifacts.
+- Add Web UI for batch import, tag editing, document browsing, and image preview.
+- Add REST API for external systems to ingest, search, read, and tag knowledge-base content.
+- Add MCP server mode for AI agents such as Cursor and Claude Code.
 - Add CocoIndex-style incremental indexing and lineage.
 - Add OpenTagging/MetaLabel-style tag lifecycle management.
 - Add Dify Knowledge Pipeline and Airweave adapters.
-- Add MCP tools for AI agents such as Cursor and Claude Code.
 
-## 14. Operational Checklist
+## 15. Operational Checklist
 
 For a fresh local run:
 

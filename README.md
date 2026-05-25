@@ -25,6 +25,8 @@ Planned extensions are documented in [docs/operation-manual.md](docs/operation-m
 - Chunking, embedding, and TiDB vector search.
 - MinIO for raw object storage.
 - Dify Knowledge Pipeline and Airweave adapters.
+- Web UI for batch import, tag editing, knowledge-base browsing, and image preview.
+- REST API for external systems to query and ingest knowledge.
 - MCP server for AI agents.
 
 ## Requirements
@@ -141,6 +143,26 @@ Searches title, path, and content with a SQL `LIKE` query and prints matching sn
 ./kb-tool search -limit 5 tidb
 ```
 
+### Planned `server`
+
+The next major mode will expose the knowledge base through Web UI, REST API, and MCP from one process:
+
+```bash
+./kb-tool server -addr 127.0.0.1:8080
+```
+
+Planned access surfaces:
+
+- Web UI: batch import local paths and Git repositories, inspect documents, edit tags, filter by tags, and preview images directly in the browser.
+- REST API: external systems can ingest sources, list documents, search, read document detail, fetch image assets, and manage tags.
+- MCP tools: AI agents can call `search_knowledge`, `get_document`, `list_documents`, `list_tags`, `ingest_source`, and `add_document_tags`.
+
+Planned image behavior:
+
+- Image files are stored as assets with `image/png`, `image/jpeg`, `image/gif`, or `image/webp` MIME types.
+- Images are not forced into text fields.
+- Browser preview uses an asset endpoint that returns the correct `Content-Type`, so images render visually instead of appearing as garbled binary text.
+
 ## Schema
 
 The current version creates three tables:
@@ -169,6 +191,17 @@ ingest service
 TiDB store
         ↓
 CLI search
+```
+
+Planned server architecture:
+
+```text
+Browser Web UI ─┐
+External REST ──┼─ kb-tool server ─ TiDB knowledge store
+MCP clients  ───┘
+                  ├─ ingest service
+                  ├─ document/tag/search API
+                  └─ asset endpoint for images and binary files
 ```
 
 Main packages:
@@ -205,6 +238,8 @@ gofmt -w cmd internal
 - No chunking or embedding yet.
 - No TiDB vector search yet.
 - No MinIO object storage yet.
+- No Web UI, REST API, or MCP server yet.
+- No browser image preview endpoint yet.
 - No manual tag review workflow yet.
 - Git repository ingestion uses a temporary shallow clone and requires local Git credentials for private repositories.
 
