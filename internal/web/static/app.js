@@ -25,16 +25,55 @@ const els = {
   textPreview: document.querySelector("#textPreview"),
 };
 
-async function api(path, options = {}) {
+function storedApiToken() {
+  try {
+    return localStorage.getItem("kbToolApiToken") || "";
+  } catch (error) {
+    return "";
+  }
+}
+
+function storeApiToken(token) {
+  try {
+    localStorage.setItem("kbToolApiToken", token);
+  } catch (error) {
+    return;
+  }
+}
+
+function apiHeaders(options = {}) {
+  const token = storedApiToken();
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(options.headers || {}),
+  };
+}
+
+async function api(path, options = {}, allowTokenPrompt = true) {
   const response = await fetch(path, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    headers: apiHeaders(options),
     ...options,
   });
+  if (response.status === 401 && allowTokenPrompt) {
+    const message = storedApiToken() ? "API Token 无效，请重新输入" : "请输入 API Token";
+    const token = window.prompt(message);
+    if (token) {
+      storeApiToken(token.trim());
+      return api(path, options, false);
+    }
+  }
   if (!response.ok) {
     const text = await response.text();
     throw new Error(text || response.statusText);
   }
   return response.json();
+}
+
+function assetURL(id) {
+  const token = storedApiToken();
+  const suffix = token ? `?access_token=${encodeURIComponent(token)}` : "";
+  return `/api/documents/${id}/asset${suffix}`;
 }
 
 function tagHtml(tags = []) {
@@ -110,7 +149,7 @@ async function selectDocument(id) {
   els.detailTags.innerHTML = tagHtml(doc.tags || []);
   els.assetPreview.innerHTML = "";
   if (doc.is_binary && (doc.mime_type || "").startsWith("image/")) {
-    els.assetPreview.innerHTML = `<img src="/api/documents/${doc.id}/asset" alt="${escapeHtml(doc.title || "image preview")}">`;
+    els.assetPreview.innerHTML = `<img src="${assetURL(doc.id)}" alt="${escapeHtml(doc.title || "image preview")}">`;
     els.textPreview.textContent = "";
   } else {
     els.textPreview.textContent = doc.content || "";

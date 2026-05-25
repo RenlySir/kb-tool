@@ -1,0 +1,9 @@
+.git
+.github
+.worktrees
+kb-tool
+dist
+tmp
+.DS_Store
+.env
+*.log

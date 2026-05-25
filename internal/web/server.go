@@ -92,7 +92,10 @@ func (s *Server) authorized(r *http.Request) bool {
 	if s.config.APIToken == "" {
 		return true
 	}
-	return r.Header.Get("Authorization") == "Bearer "+s.config.APIToken
+	if r.Header.Get("Authorization") == "Bearer "+s.config.APIToken {
+		return true
+	}
+	return strings.HasSuffix(r.URL.Path, "/asset") && r.URL.Query().Get("access_token") == s.config.APIToken
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

@@ -34,7 +34,7 @@ Planned extensions are documented in [docs/operation-manual.md](docs/operation-m
 - Go 1.24 or newer.
 - Git CLI for GitHub/GitLab repository ingestion.
 - TiDB reachable through the MySQL protocol.
-- Docker Compose, only if you want to use the included local TiDB service.
+- Docker and Docker Compose, if you want to build the image or run the included local stack.
 
 ## Quick Start
 
@@ -81,6 +81,38 @@ Start the Web UI:
 ```
 
 Open [http://127.0.0.1:8080](http://127.0.0.1:8080).
+
+## Docker Quick Start
+
+Build the application image:
+
+```bash
+docker build -t kb-tool:local .
+```
+
+Run the full local stack with TiDB and the Web UI:
+
+```bash
+docker compose build kb-tool
+docker compose up -d tidb
+docker compose run --rm kb-tool migrate
+docker compose up -d kb-tool
+```
+
+Open [http://127.0.0.1:8080](http://127.0.0.1:8080). Docker Compose binds the service on `0.0.0.0:8080`, so it sets `KB_TOOL_API_TOKEN` to `dev-token` by default. The Web UI prompts for the token on the first API request. Override it for real use:
+
+```bash
+KB_TOOL_API_TOKEN=<strong-token> docker compose up -d kb-tool
+```
+
+Run one-off commands inside the image:
+
+```bash
+docker compose run --rm kb-tool ingest /workspace/docs
+docker compose run --rm kb-tool search tidb
+```
+
+The Compose service mounts the repository read-only at `/workspace`, so paths inside the container should use `/workspace/...`. The runtime image includes Git, so GitHub and GitLab repository ingestion works from the container when network access and credentials are available.
 
 ## Configuration
 
@@ -169,6 +201,8 @@ For external binding, configure an API token:
 ```bash
 KB_TOOL_API_TOKEN=<token> ./kb-tool server -addr 0.0.0.0:8080
 ```
+
+The Web UI prompts for this token when the REST API returns `401 Unauthorized` and stores it in browser `localStorage` under `kbToolApiToken`. REST clients should send `Authorization: Bearer <token>`. Image previews use the same token through the asset endpoint so images render visually in the browser.
 
 Planned MCP and LLM access:
 

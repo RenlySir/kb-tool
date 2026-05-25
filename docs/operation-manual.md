@@ -21,7 +21,7 @@ source input
 
 ## Correct Usage Steps
 
-Use this sequence for a fresh local setup:
+Use this sequence for a fresh local setup with a local binary:
 
 1. Start TiDB:
 
@@ -76,6 +76,50 @@ http://127.0.0.1:8080
 - Add manual tags with comma-separated input.
 - Select image documents to view them as images instead of binary text.
 
+Use this sequence for a fresh Docker setup:
+
+1. Build the image:
+
+```bash
+docker compose build kb-tool
+```
+
+2. Start TiDB:
+
+```bash
+docker compose up -d tidb
+```
+
+3. Initialize the schema:
+
+```bash
+docker compose run --rm kb-tool migrate
+```
+
+4. Start the Web UI and API:
+
+```bash
+docker compose up -d kb-tool
+```
+
+5. Open the workbench:
+
+```text
+http://127.0.0.1:8080
+```
+
+6. Enter the API token when prompted. The default Docker Compose token is:
+
+```text
+dev-token
+```
+
+For real use, set your own token:
+
+```bash
+KB_TOOL_API_TOKEN=<strong-token> docker compose up -d kb-tool
+```
+
 ## 2. Prerequisites
 
 Install these tools:
@@ -121,6 +165,45 @@ go build ./cmd/kb-tool
 ```
 
 This creates `./kb-tool`. The binary is ignored by Git.
+
+## 4.1 Build and Run with Docker
+
+Build only the image:
+
+```bash
+docker build -t kb-tool:local .
+```
+
+Run the full local stack:
+
+```bash
+docker compose build kb-tool
+docker compose up -d tidb
+docker compose run --rm kb-tool migrate
+docker compose up -d kb-tool
+```
+
+The `kb-tool` service uses these defaults:
+
+```text
+TIDB_HOST=tidb
+TIDB_PORT=4000
+TIDB_USER=root
+TIDB_DATABASE=kb
+KB_TOOL_API_TOKEN=dev-token
+```
+
+The service listens on `0.0.0.0:8080` inside the container and is published to `127.0.0.1:8080` through Docker. Because the server is externally bound, an API token is required. The browser prompts for the token on the first API request.
+
+Run CLI commands through Compose:
+
+```bash
+docker compose run --rm kb-tool ingest /workspace/README.md
+docker compose run --rm kb-tool ingest https://github.com/RenlySir/kb-tool.git
+docker compose run --rm kb-tool search tidb
+```
+
+The Compose service mounts the repository read-only at `/workspace`, so local paths should use `/workspace/...` when commands run in the container. The runtime image includes the Git CLI for GitHub and GitLab ingestion. Private repositories still require credentials or SSH configuration to be available inside the container.
 
 ## 5. Configure TiDB
 
@@ -560,6 +643,7 @@ Authorization: Bearer <token>
 ```
 
 The Web UI can reuse the same token through request headers when exposed behind an authenticated reverse proxy.
+When the built-in Web UI receives `401 Unauthorized`, it asks for the token and stores it in browser `localStorage` as `kbToolApiToken`. Image preview requests use the token only on `/api/documents/{id}/asset`, so protected image assets render as images instead of unreadable binary text.
 
 ## 13. Planned LLM Connection and AI Tagging
 
@@ -825,6 +909,12 @@ Expected response:
 {"status":"ok"}
 ```
 
+If Docker Compose is used, the API token defaults to `dev-token`. Enter that token in the Web UI prompt, or set your own token before starting the service:
+
+```bash
+KB_TOOL_API_TOKEN=<strong-token> docker compose up -d kb-tool
+```
+
 ### Image Preview Shows Broken Image
 
 Confirm the document is an image asset:
@@ -891,11 +981,22 @@ go build ./cmd/kb-tool
 go test ./...
 ```
 
+For a fresh Docker run:
+
+```bash
+docker compose build kb-tool
+docker compose up -d tidb
+docker compose run --rm kb-tool migrate
+docker compose up -d kb-tool
+docker compose ps
+```
+
 For committing changes:
 
 ```bash
 gofmt -w cmd internal
 go test ./...
 go build ./cmd/kb-tool
+docker build -t kb-tool:local .
 git status --short
 ```

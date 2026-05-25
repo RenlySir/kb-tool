@@ -92,6 +92,37 @@ func TestServerReturnsImageAssetInline(t *testing.T) {
 	}
 }
 
+func TestServerRequiresAndAcceptsAPIToken(t *testing.T) {
+	repo := &fakeRepository{}
+	server := web.NewServer(web.Config{APIToken: "secret"}, repo, nil)
+
+	unauthorized := httptest.NewRecorder()
+	server.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/documents", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("expected unauthorized status, got %d", unauthorized.Code)
+	}
+
+	queryToken := httptest.NewRecorder()
+	server.ServeHTTP(queryToken, httptest.NewRequest(http.MethodGet, "/api/documents?access_token=secret", nil))
+	if queryToken.Code != http.StatusUnauthorized {
+		t.Fatalf("expected document query token to stay unauthorized, got %d", queryToken.Code)
+	}
+
+	authorized := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/documents", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	server.ServeHTTP(authorized, request)
+	if authorized.Code != http.StatusOK {
+		t.Fatalf("expected authorized status, got %d", authorized.Code)
+	}
+
+	asset := httptest.NewRecorder()
+	server.ServeHTTP(asset, httptest.NewRequest(http.MethodGet, "/api/documents/1/asset?access_token=secret", nil))
+	if asset.Code != http.StatusOK {
+		t.Fatalf("expected tokenized asset status, got %d", asset.Code)
+	}
+}
+
 func TestServerIngestsBatchSources(t *testing.T) {
 	repo := &fakeRepository{}
 	ingester := web.IngesterFunc(func(ctx context.Context, input string) (web.IngestResult, error) {

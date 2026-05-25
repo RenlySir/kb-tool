@@ -1,4 +1,27 @@
 services:
+  kb-tool:
+    build:
+      context: .
+      target: runtime
+    depends_on:
+      - tidb
+    environment:
+      TIDB_HOST: tidb
+      TIDB_PORT: "4000"
+      TIDB_USER: root
+      TIDB_PASSWORD: ""
+      TIDB_DATABASE: kb
+      KB_TOOL_API_TOKEN: ${KB_TOOL_API_TOKEN:-dev-token}
+    command:
+      - server
+      - -addr
+      - 0.0.0.0:8080
+    working_dir: /workspace
+    volumes:
+      - .:/workspace:ro
+    ports:
+      - "8080:8080"
+
   tidb:
     image: pingcap/tidb:v8.5.0
     command:
