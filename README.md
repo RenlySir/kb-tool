@@ -131,6 +131,7 @@ The CLI reads TiDB settings from environment variables and command flags. Flags 
 | REST API token | `KB_TOOL_API_TOKEN` | `-api-token` | empty |
 | Web admin user | `KB_TOOL_ADMIN_USER` | `-admin-user` | `admin` |
 | Web admin password | `KB_TOOL_ADMIN_PASSWORD` | `-admin-password` | `admin123` |
+| Web database connections file | `KB_TOOL_CONNECTIONS_FILE` | `-connections-file` | `data/connections.json` |
 | Max file size | `KB_TOOL_MAX_FILE_BYTES` | `-max-file-bytes` | `512MiB` |
 | Max extracted text per document | `KB_TOOL_MAX_TEXT_BYTES` | `-max-text-bytes` | `2MiB` |
 | Search limit | none | `-limit` | `20` |
@@ -217,7 +218,7 @@ Starts the built-in Web UI and REST API from one process:
 
 Access surfaces:
 
-- Web UI: login with an admin account, choose a source/project type, batch import local paths and Git repositories, select multiple documents, add tags in bulk, inspect documents, edit tags, filter by tags, and preview images directly in the browser.
+- Web UI: login with an admin account, use a management-system layout with collapsed functional modules, create/test/select TiDB database connections, choose a source/project type, batch import local paths and Git repositories, select multiple documents, add tags in bulk, inspect documents, edit tags, filter by tags, and preview images directly in the browser.
 - REST API: external systems can ingest sources, list documents, search, read document detail, fetch image assets, and manage tags.
 
 For external binding, configure an API token:
@@ -230,6 +231,30 @@ KB_TOOL_ADMIN_PASSWORD=<password> \
 ```
 
 The Web UI posts the configured admin username/password to `/api/login`, stores the returned token in browser `localStorage` under `kbToolApiToken`, and uses it for API calls. REST clients should send `Authorization: Bearer <token>`. Image previews use the same token through the asset endpoint so images render visually in the browser.
+
+The database manager stores TiDB connection profiles in `KB_TOOL_CONNECTIONS_FILE`. List responses only expose `has_password`; they never return the database password. Docker Compose stores this file in the `kb-tool-data` volume at `/data/connections.json`.
+
+Database connection management endpoints:
+
+```http
+GET    /api/connections
+POST   /api/connections
+POST   /api/connections/test
+POST   /api/connections/{id}/activate
+```
+
+Example connection payload:
+
+```json
+{
+  "name": "生产知识库",
+  "host": "10.0.0.8",
+  "port": 4000,
+  "user": "kb_user",
+  "password": "secret",
+  "database": "kb_prod"
+}
+```
 
 Batch import supports an explicit `source_type` value: `auto`, `file`, `github`, `gitlab`, `office`, or `image`. The Web UI exposes this as the project type selector. The REST payload looks like:
 

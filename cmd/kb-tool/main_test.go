@@ -49,6 +49,18 @@ func TestParseConfigSupportsServerCommand(t *testing.T) {
 	}
 }
 
+func TestParseConfigSupportsConnectionsFile(t *testing.T) {
+	t.Setenv("KB_TOOL_CONNECTIONS_FILE", "/tmp/from-env.json")
+
+	cfg, err := parseConfig([]string{"server", "-connections-file", "/tmp/from-flag.json"})
+	if err != nil {
+		t.Fatalf("parseConfig returned error: %v", err)
+	}
+	if cfg.ConnectionsFile != "/tmp/from-flag.json" {
+		t.Fatalf("unexpected connections file: %q", cfg.ConnectionsFile)
+	}
+}
+
 func TestParseConfigSupportsLargeFileOptions(t *testing.T) {
 	cfg, err := parseConfig([]string{"ingest", "-max-file-bytes", "512MiB", "-max-text-bytes", "2MiB", "./docs"})
 	if err != nil {

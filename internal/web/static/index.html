@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>kb-tool 知识库工作台</title>
+    <title>kb-tool 知识库管理系统</title>
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
@@ -12,8 +12,8 @@
         <div class="brand-lockup">
           <span class="brand-mark">KB</span>
           <div>
-            <h1>知识库工作台</h1>
-            <p>登录后导入数据、打标签并查看知识库内容。</p>
+            <h1>知识库管理系统</h1>
+            <p>登录后管理数据库连接、导入数据并维护标签。</p>
           </div>
         </div>
         <label>
@@ -29,101 +29,206 @@
       </form>
     </section>
 
-    <main id="appView" class="app-shell hidden">
-      <header class="topbar">
-        <div class="brand-lockup">
+    <main id="appView" class="admin-shell hidden">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
           <span class="brand-mark">KB</span>
           <div>
-            <h1>知识库工作台</h1>
-            <p>批量导入、打标签、检索和预览知识内容。</p>
+            <strong>知识库管理</strong>
+            <span>kb-tool</span>
           </div>
         </div>
-        <div class="topbar-actions">
-          <span id="sessionUser" class="session-user"></span>
-          <button id="refreshBtn" class="secondary" type="button">刷新</button>
-          <button id="logoutBtn" class="ghost" type="button">退出</button>
-        </div>
-      </header>
+        <nav class="sidebar-nav" aria-label="功能导航">
+          <button class="nav-item active" type="button" data-panel="overviewPanel">
+            <span class="nav-icon">⌂</span>
+            <span>知识库内容</span>
+          </button>
+          <button class="nav-item" type="button" data-panel="databasePanel">
+            <span class="nav-icon">▦</span>
+            <span>数据库管理</span>
+          </button>
+          <button class="nav-item" type="button" data-panel="importPanel">
+            <span class="nav-icon">⇧</span>
+            <span>数据导入</span>
+          </button>
+          <button class="nav-item" type="button" data-panel="tagPanel">
+            <span class="nav-icon">#</span>
+            <span>标签管理</span>
+          </button>
+          <button class="nav-item" type="button" data-panel="filterPanel">
+            <span class="nav-icon">⌕</span>
+            <span>标签筛选</span>
+          </button>
+        </nav>
+      </aside>
 
-      <section class="workspace">
-        <aside class="control-panel">
-          <section class="panel-section">
-            <div class="section-heading">
-              <h2>数据导入</h2>
-              <span class="count-pill">批量</span>
+      <section class="main-area">
+        <header class="topbar">
+          <div>
+            <h1>知识库内容</h1>
+            <p id="currentConnectionLabel">当前数据库：加载中</p>
+          </div>
+          <div class="topbar-actions">
+            <span id="sessionUser" class="session-user"></span>
+            <button id="refreshBtn" class="secondary" type="button">刷新</button>
+            <button id="logoutBtn" class="ghost" type="button">退出</button>
+          </div>
+        </header>
+
+        <section id="moduleDrawer" class="module-drawer hidden" aria-live="polite">
+          <div class="drawer-heading">
+            <div>
+              <h2 id="drawerTitle">功能面板</h2>
+              <p id="drawerSubtitle">点击左侧菜单展开功能。</p>
             </div>
-            <label class="field">
-              <span>项目类型</span>
-              <select id="sourceType">
-                <option value="auto">自动识别</option>
-                <option value="file">本地文件/目录</option>
-                <option value="github">GitHub 仓库</option>
-                <option value="gitlab">GitLab 仓库</option>
-                <option value="office">Office 文档</option>
-                <option value="image">图片资产</option>
-              </select>
-            </label>
-            <label class="field">
-              <span>来源列表</span>
-              <textarea id="sourceInput" spellcheck="false" placeholder="./docs&#10;https://github.com/RenlySir/kb-tool.git"></textarea>
-            </label>
-            <button id="ingestBtn" type="button">开始导入</button>
+            <button id="closeDrawerBtn" class="ghost" type="button">收起</button>
+          </div>
+
+          <section id="databasePanel" class="drawer-panel hidden" data-title="数据库管理" data-subtitle="创建、测试并选择当前知识库使用的 TiDB 数据库。">
+            <div class="connection-layout">
+              <div>
+                <h3>已配置连接</h3>
+                <div id="connectionList" class="connection-list"></div>
+              </div>
+              <form id="connectionForm" class="connection-form">
+                <input id="connectionIdInput" type="hidden">
+                <label class="field">
+                  <span>连接名称</span>
+                  <input id="connectionNameInput" type="text" placeholder="例如：生产知识库">
+                </label>
+                <div class="form-grid">
+                  <label class="field">
+                    <span>IP / Host</span>
+                    <input id="connectionHostInput" type="text" placeholder="127.0.0.1">
+                  </label>
+                  <label class="field">
+                    <span>端口</span>
+                    <input id="connectionPortInput" type="number" min="1" max="65535" value="4000">
+                  </label>
+                </div>
+                <div class="form-grid">
+                  <label class="field">
+                    <span>账号</span>
+                    <input id="connectionUserInput" type="text" placeholder="root">
+                  </label>
+                  <label class="field">
+                    <span>密码</span>
+                    <input id="connectionPasswordInput" type="password" placeholder="留空则保留原密码">
+                  </label>
+                </div>
+                <label class="field">
+                  <span>数据库名</span>
+                  <input id="connectionDatabaseInput" type="text" placeholder="kb">
+                </label>
+                <div class="form-actions">
+                  <button id="saveConnectionBtn" type="submit">保存连接</button>
+                  <button id="testConnectionBtn" class="secondary" type="button">测试连接</button>
+                  <button id="resetConnectionBtn" class="ghost" type="button">清空</button>
+                </div>
+                <div id="connectionMessage" class="status-log compact"></div>
+              </form>
+            </div>
+          </section>
+
+          <section id="importPanel" class="drawer-panel hidden" data-title="数据导入" data-subtitle="选择项目类型后批量导入文件、目录或代码仓库。">
+            <div class="panel-grid">
+              <label class="field">
+                <span>项目类型</span>
+                <select id="sourceType">
+                  <option value="auto">自动识别</option>
+                  <option value="file">本地文件/目录</option>
+                  <option value="github">GitHub 仓库</option>
+                  <option value="gitlab">GitLab 仓库</option>
+                  <option value="office">Office 文档</option>
+                  <option value="image">图片资产</option>
+                </select>
+              </label>
+              <label class="field wide">
+                <span>来源列表</span>
+                <textarea id="sourceInput" spellcheck="false" placeholder="./docs&#10;https://github.com/RenlySir/kb-tool.git"></textarea>
+              </label>
+            </div>
+            <div class="form-actions">
+              <button id="ingestBtn" type="button">开始导入</button>
+            </div>
             <div id="ingestResult" class="status-log"></div>
           </section>
 
-          <section class="panel-section">
-            <div class="section-heading">
-              <h2>标签操作</h2>
-              <span id="selectionSummary" class="count-pill">未选择</span>
+          <section id="tagPanel" class="drawer-panel hidden" data-title="标签管理" data-subtitle="勾选知识库内容后，为选中内容批量添加标签。">
+            <div class="panel-grid">
+              <label class="field wide">
+                <span>给已选内容打标签</span>
+                <input id="batchTagInput" type="text" placeholder="例如：合同, AI, 产品手册">
+              </label>
+              <div class="selection-box">
+                <span id="selectionSummary">未选择</span>
+              </div>
             </div>
-            <label class="field">
-              <span>给已选内容打标签</span>
-              <input id="batchTagInput" type="text" placeholder="例如：合同, AI, 产品手册">
-            </label>
-            <button id="batchTagBtn" type="button">批量打标签</button>
+            <div class="form-actions">
+              <button id="batchTagBtn" type="button">批量打标签</button>
+            </div>
             <div id="batchTagMessage" class="status-log compact"></div>
           </section>
 
-          <section class="panel-section">
+          <section id="filterPanel" class="drawer-panel hidden" data-title="标签筛选" data-subtitle="点击标签快速筛选知识库内容。">
             <div class="section-heading">
-              <h2>标签筛选</h2>
-              <button id="clearTagBtn" class="text-button" type="button">清除</button>
+              <h3>全部标签</h3>
+              <button id="clearTagBtn" class="text-button" type="button">清除筛选</button>
             </div>
             <div id="tagList" class="tag-list"></div>
           </section>
-        </aside>
 
-        <section class="document-panel">
-          <div class="list-toolbar">
-            <input id="searchInput" type="search" placeholder="搜索标题、路径或正文">
-            <button id="searchBtn" class="secondary" type="button">搜索</button>
-          </div>
-          <div class="list-summary">
-            <span id="documentCount">0 条内容</span>
-            <span id="activeFilter"></span>
-          </div>
-          <div id="documentList" class="document-list"></div>
+          <section id="overviewPanel" class="drawer-panel hidden" data-title="知识库内容" data-subtitle="左侧模块默认折叠，点击后展开管理功能。">
+            <div class="overview-grid">
+              <div class="metric-tile">
+                <span>知识内容</span>
+                <strong id="overviewDocumentCount">0</strong>
+              </div>
+              <div class="metric-tile">
+                <span>已选内容</span>
+                <strong id="overviewSelectionCount">0</strong>
+              </div>
+              <div class="metric-tile">
+                <span>当前筛选</span>
+                <strong id="overviewFilterLabel">全部</strong>
+              </div>
+            </div>
+          </section>
         </section>
 
-        <aside class="detail-panel">
-          <div id="detailEmpty" class="empty-state">选择一条知识内容查看正文、标签和图片资产。</div>
-          <article id="detailView" class="detail hidden">
-            <div class="detail-heading">
-              <div>
-                <h2 id="detailTitle"></h2>
-                <p id="detailPath"></p>
+        <section class="content-grid">
+          <section class="document-panel">
+            <div class="list-toolbar">
+              <input id="searchInput" type="search" placeholder="搜索标题、路径或正文">
+              <button id="searchBtn" class="secondary" type="button">搜索</button>
+            </div>
+            <div class="list-summary">
+              <span id="documentCount">0 条内容</span>
+              <span id="activeFilter"></span>
+            </div>
+            <div id="documentList" class="document-list"></div>
+          </section>
+
+          <aside class="detail-panel">
+            <div id="detailEmpty" class="empty-state">选择一条知识内容查看正文、标签和图片资产。</div>
+            <article id="detailView" class="detail hidden">
+              <div class="detail-heading">
+                <div>
+                  <h2 id="detailTitle"></h2>
+                  <p id="detailPath"></p>
+                </div>
+                <span id="detailType" class="type-pill"></span>
               </div>
-              <span id="detailType" class="type-pill"></span>
-            </div>
-            <div id="detailTags" class="tag-list"></div>
-            <div class="inline-editor">
-              <input id="tagInput" type="text" placeholder="添加标签，逗号分隔">
-              <button id="addTagBtn" class="secondary" type="button">添加</button>
-            </div>
-            <div id="assetPreview" class="asset-preview"></div>
-            <pre id="textPreview"></pre>
-          </article>
-        </aside>
+              <div id="detailTags" class="tag-list"></div>
+              <div class="inline-editor">
+                <input id="tagInput" type="text" placeholder="添加标签，逗号分隔">
+                <button id="addTagBtn" class="secondary" type="button">添加</button>
+              </div>
+              <div id="assetPreview" class="asset-preview"></div>
+              <pre id="textPreview"></pre>
+            </article>
+          </aside>
+        </section>
       </section>
     </main>
     <script src="/app.js"></script>

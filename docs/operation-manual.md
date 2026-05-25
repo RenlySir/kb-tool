@@ -542,6 +542,15 @@ The Web UI is a knowledge-base workbench, not a marketing page.
 
 Primary screens:
 
+- Management navigation:
+  - The Web UI uses an admin-system layout.
+  - Functional modules are collapsed by default in the left navigation.
+  - Click Database Management, Import, Tag Management, or Tag Filter to expand the matching drawer.
+- Database management:
+  - Create TiDB connection profiles with name, IP/host, port, username, password, and database.
+  - Test a connection before using it.
+  - Activate one connection as the current knowledge-base database.
+  - Store connection profiles in `KB_TOOL_CONNECTIONS_FILE`; password values are not returned by list APIs.
 - Import screen:
   - Choose the project/source type: auto, local file/directory, GitHub, GitLab, Office document, or image asset.
   - Batch import local file paths, local directories, GitHub URLs, and GitLab URLs.
@@ -580,6 +589,10 @@ Endpoints:
 GET    /api/health
 GET    /api/session
 POST   /api/login
+GET    /api/connections
+POST   /api/connections
+POST   /api/connections/test
+POST   /api/connections/{id}/activate
 GET    /api/documents
 GET    /api/documents/{id}
 GET    /api/documents/{id}/asset
@@ -591,6 +604,21 @@ POST   /api/documents/{id}/tags
 ```
 
 `DELETE /api/documents/{id}/tags/{tag}` is planned and not implemented yet.
+
+Example connection request:
+
+```json
+{
+  "name": "生产知识库",
+  "host": "10.0.0.8",
+  "port": 4000,
+  "user": "kb_user",
+  "password": "secret",
+  "database": "kb_prod"
+}
+```
+
+`GET /api/connections` returns `has_password` but never returns password values.
 
 Example ingest request:
 

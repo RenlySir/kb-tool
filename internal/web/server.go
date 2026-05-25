@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/RenlySir/kb-tool/internal/kb"
 	"github.com/RenlySir/kb-tool/internal/store"
 )
 
@@ -22,6 +23,25 @@ type Config struct {
 	APIToken      string
 	AdminUser     string
 	AdminPassword string
+}
+
+type ConnectionInput = kb.ConnectionInput
+type ConnectionView = kb.ConnectionView
+
+type ConnectionManager interface {
+	ListConnections(ctx context.Context) ([]ConnectionView, error)
+	CurrentConnection(ctx context.Context) (ConnectionView, error)
+	SaveConnection(ctx context.Context, input ConnectionInput) (ConnectionView, error)
+	TestConnection(ctx context.Context, input ConnectionInput) error
+	ActivateConnection(ctx context.Context, id string) (ConnectionView, error)
+}
+
+type Option func(*Server)
+
+func WithConnectionManager(manager ConnectionManager) Option {
+	return func(s *Server) {
+		s.connectionManager = manager
+	}
 }
 
 type Repository interface {
@@ -57,14 +77,18 @@ type IngestSourceResult struct {
 }
 
 type Server struct {
-	config   Config
-	repo     Repository
-	ingester Ingester
-	mux      *http.ServeMux
+	config            Config
+	repo              Repository
+	ingester          Ingester
+	connectionManager ConnectionManager
+	mux               *http.ServeMux
 }
 
-func NewServer(config Config, repo Repository, ingester Ingester) *Server {
+func NewServer(config Config, repo Repository, ingester Ingester, options ...Option) *Server {
 	server := &Server{config: config, repo: repo, ingester: ingester, mux: http.NewServeMux()}
+	for _, option := range options {
+		option(server)
+	}
 	server.routes()
 	return server
 }
@@ -87,6 +111,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/tags", s.handleTags)
 	s.mux.HandleFunc("/api/search", s.handleSearch)
 	s.mux.HandleFunc("/api/ingest", s.handleIngest)
+	s.mux.HandleFunc("/api/connections", s.handleConnections)
+	s.mux.HandleFunc("/api/connections/test", s.handleConnectionTest)
+	s.mux.HandleFunc("/api/connections/", s.handleConnectionAction)
 
 	sub, err := fs.Sub(staticFiles, "static")
 	if err != nil {
@@ -332,6 +359,85 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		results = append(results, result)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": results})
+}
+
+func (s *Server) handleConnections(w http.ResponseWriter, r *http.Request) {
+	if s.connectionManager == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "connection manager unavailable"})
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		connections, err := s.connectionManager.ListConnections(r.Context())
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		current, err := s.connectionManager.CurrentConnection(r.Context())
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"connections": connections, "current": current})
+	case http.MethodPost:
+		var request ConnectionInput
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+			return
+		}
+		view, err := s.connectionManager.SaveConnection(r.Context(), request)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, view)
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) handleConnectionTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	if s.connectionManager == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "connection manager unavailable"})
+		return
+	}
+	var request ConnectionInput
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if err := s.connectionManager.TestConnection(r.Context(), request); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleConnectionAction(w http.ResponseWriter, r *http.Request) {
+	if s.connectionManager == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "connection manager unavailable"})
+		return
+	}
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/connections/")
+	parts := strings.Split(strings.Trim(trimmed, "/"), "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] != "activate" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	view, err := s.connectionManager.ActivateConnection(r.Context(), parts[0])
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
 }
 
 func cleanTags(tags []string) []string {

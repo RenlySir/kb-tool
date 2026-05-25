@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/RenlySir/kb-tool/internal/store"
@@ -225,6 +226,53 @@ func TestServerIngestsBatchSources(t *testing.T) {
 	}
 }
 
+func TestServerManagesDatabaseConnections(t *testing.T) {
+	manager := &fakeConnectionManager{
+		connections: []web.ConnectionView{{
+			ID:          "default",
+			Name:        "默认 TiDB",
+			Host:        "tidb",
+			Port:        4000,
+			User:        "root",
+			Database:    "kb",
+			Active:      true,
+			HasPassword: false,
+		}},
+	}
+	server := web.NewServer(web.Config{}, &fakeRepository{}, nil, web.WithConnectionManager(manager))
+
+	list := httptest.NewRecorder()
+	server.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/connections", nil))
+	if list.Code != http.StatusOK {
+		t.Fatalf("list connections status = %d, body = %s", list.Code, list.Body.String())
+	}
+	if strings.Contains(list.Body.String(), `"password":`) {
+		t.Fatalf("connection list leaked password field: %s", list.Body.String())
+	}
+
+	create := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"name":"生产 TiDB","host":"10.0.0.8","port":4000,"user":"kb","password":"secret","database":"kb_prod"}`)
+	server.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/api/connections", body))
+	if create.Code != http.StatusOK {
+		t.Fatalf("create connection status = %d, body = %s", create.Code, create.Body.String())
+	}
+	if manager.saved.Password != "secret" {
+		t.Fatalf("expected manager to receive password, got %#v", manager.saved)
+	}
+	if strings.Contains(create.Body.String(), "secret") || strings.Contains(create.Body.String(), `"password":`) {
+		t.Fatalf("create response leaked password: %s", create.Body.String())
+	}
+
+	activate := httptest.NewRecorder()
+	server.ServeHTTP(activate, httptest.NewRequest(http.MethodPost, "/api/connections/prod/activate", nil))
+	if activate.Code != http.StatusOK {
+		t.Fatalf("activate connection status = %d, body = %s", activate.Code, activate.Body.String())
+	}
+	if manager.activatedID != "prod" {
+		t.Fatalf("expected prod activation, got %q", manager.activatedID)
+	}
+}
+
 type addTagCall struct {
 	documentID int64
 	tags       []string
@@ -235,6 +283,47 @@ type fakeRepository struct {
 	asset       store.AssetRecord
 	addTagCalls []addTagCall
 	lastSearch  string
+}
+
+type fakeConnectionManager struct {
+	connections []web.ConnectionView
+	saved       web.ConnectionInput
+	activatedID string
+}
+
+func (m *fakeConnectionManager) ListConnections(ctx context.Context) ([]web.ConnectionView, error) {
+	return m.connections, nil
+}
+
+func (m *fakeConnectionManager) CurrentConnection(ctx context.Context) (web.ConnectionView, error) {
+	for _, conn := range m.connections {
+		if conn.Active {
+			return conn, nil
+		}
+	}
+	return web.ConnectionView{}, nil
+}
+
+func (m *fakeConnectionManager) SaveConnection(ctx context.Context, input web.ConnectionInput) (web.ConnectionView, error) {
+	m.saved = input
+	return web.ConnectionView{
+		ID:          "prod",
+		Name:        input.Name,
+		Host:        input.Host,
+		Port:        input.Port,
+		User:        input.User,
+		Database:    input.Database,
+		HasPassword: input.Password != "",
+	}, nil
+}
+
+func (m *fakeConnectionManager) TestConnection(ctx context.Context, input web.ConnectionInput) error {
+	return nil
+}
+
+func (m *fakeConnectionManager) ActivateConnection(ctx context.Context, id string) (web.ConnectionView, error) {
+	m.activatedID = id
+	return web.ConnectionView{ID: id, Active: true}, nil
 }
 
 func (r *fakeRepository) ListDocuments(ctx context.Context, filter store.DocumentFilter) ([]store.DocumentRecord, error) {

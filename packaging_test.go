@@ -11,6 +11,7 @@ func TestDockerPackagingFilesDescribeRunnableServer(t *testing.T) {
 	for _, fragment := range []string{
 		"FROM golang:1.24",
 		"go build",
+		"mkdir -p /workspace /data",
 		"USER kbtool",
 		"EXPOSE 8080",
 		`ENTRYPOINT ["/usr/local/bin/kb-tool"]`,

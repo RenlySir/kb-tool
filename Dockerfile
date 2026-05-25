@@ -14,8 +14,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --shell /usr/sbin/nologin kbtool \
-    && mkdir -p /workspace \
-    && chown kbtool:kbtool /workspace
+    && mkdir -p /workspace /data \
+    && chown kbtool:kbtool /workspace /data
 
 COPY --from=builder /out/kb-tool /usr/local/bin/kb-tool
 

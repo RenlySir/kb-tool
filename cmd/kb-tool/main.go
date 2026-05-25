@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/RenlySir/kb-tool/internal/ingest"
+	"github.com/RenlySir/kb-tool/internal/kb"
 	"github.com/RenlySir/kb-tool/internal/source"
 	"github.com/RenlySir/kb-tool/internal/store"
 	"github.com/RenlySir/kb-tool/internal/tagger"
@@ -20,16 +21,17 @@ import (
 )
 
 type config struct {
-	Command       string
-	Input         string
-	Query         string
-	Limit         int
-	Addr          string
-	APIToken      string
-	AdminUser     string
-	AdminPassword string
-	TiDB          store.Config
-	File          source.FileCollectorOptions
+	Command         string
+	Input           string
+	Query           string
+	Limit           int
+	Addr            string
+	APIToken        string
+	AdminUser       string
+	AdminPassword   string
+	ConnectionsFile string
+	TiDB            store.Config
+	File            source.FileCollectorOptions
 }
 
 func main() {
@@ -50,20 +52,24 @@ func main() {
 }
 
 func run(ctx context.Context, cfg config) error {
-	kbStore, err := store.Open(ctx, cfg.TiDB)
-	if err != nil {
-		return err
-	}
-	defer kbStore.Close()
-
 	switch cfg.Command {
 	case "migrate":
+		kbStore, err := store.Open(ctx, cfg.TiDB)
+		if err != nil {
+			return err
+		}
+		defer kbStore.Close()
 		if err := kbStore.Migrate(ctx); err != nil {
 			return err
 		}
 		fmt.Println("migration complete")
 		return nil
 	case "ingest":
+		kbStore, err := store.Open(ctx, cfg.TiDB)
+		if err != nil {
+			return err
+		}
+		defer kbStore.Close()
 		service := ingest.NewService(source.NewAutoCollectorWithOptions(cfg.File), tagger.NewRuleBasedTagger(), kbStore)
 		result, err := service.Ingest(ctx, cfg.Input)
 		if err != nil {
@@ -72,6 +78,11 @@ func run(ctx context.Context, cfg config) error {
 		fmt.Printf("ingested %d documents with %d tag assignments\n", result.Documents, result.Tags)
 		return nil
 	case "search":
+		kbStore, err := store.Open(ctx, cfg.TiDB)
+		if err != nil {
+			return err
+		}
+		defer kbStore.Close()
 		results, err := kbStore.Search(ctx, cfg.Query, cfg.Limit)
 		if err != nil {
 			return err
@@ -82,15 +93,23 @@ func run(ctx context.Context, cfg config) error {
 		}
 		return nil
 	case "server":
-		service := ingest.NewService(source.NewAutoCollectorWithOptions(cfg.File), tagger.NewRuleBasedTagger(), kbStore)
+		manager, err := kb.NewManager(ctx, kb.Config{
+			ConnectionsFile: cfg.ConnectionsFile,
+			Default:         cfg.TiDB,
+		})
+		if err != nil {
+			return err
+		}
+		defer manager.Close()
+		service := ingest.NewService(source.NewAutoCollectorWithOptions(cfg.File), tagger.NewRuleBasedTagger(), manager)
 		server := web.NewServer(web.Config{
 			APIToken:      cfg.APIToken,
 			AdminUser:     cfg.AdminUser,
 			AdminPassword: cfg.AdminPassword,
-		}, kbStore, web.IngesterFunc(func(ctx context.Context, input string) (web.IngestResult, error) {
+		}, manager, web.IngesterFunc(func(ctx context.Context, input string) (web.IngestResult, error) {
 			result, err := service.Ingest(ctx, input)
 			return web.IngestResult{Documents: result.Documents, Tags: result.Tags}, err
-		}))
+		}), web.WithConnectionManager(manager))
 		fmt.Printf("kb-tool web server listening on http://%s\n", cfg.Addr)
 		return http.ListenAndServe(cfg.Addr, server)
 	default:
@@ -112,6 +131,7 @@ func parseConfig(args []string) (config, error) {
 	cfg.APIToken = getenv("KB_TOOL_API_TOKEN", cfg.APIToken)
 	cfg.AdminUser = getenv("KB_TOOL_ADMIN_USER", "admin")
 	cfg.AdminPassword = getenv("KB_TOOL_ADMIN_PASSWORD", "admin123")
+	cfg.ConnectionsFile = getenv("KB_TOOL_CONNECTIONS_FILE", "data/connections.json")
 	cfg.File.MaxBytes = getenvBytes("KB_TOOL_MAX_FILE_BYTES", source.DefaultMaxFileBytes)
 	cfg.File.MaxTextBytes = getenvBytes("KB_TOOL_MAX_TEXT_BYTES", source.DefaultMaxTextBytes)
 
@@ -131,6 +151,7 @@ func parseConfig(args []string) (config, error) {
 	fs.StringVar(&cfg.APIToken, "api-token", cfg.APIToken, "API bearer token")
 	fs.StringVar(&cfg.AdminUser, "admin-user", cfg.AdminUser, "web admin username")
 	fs.StringVar(&cfg.AdminPassword, "admin-password", cfg.AdminPassword, "web admin password")
+	fs.StringVar(&cfg.ConnectionsFile, "connections-file", cfg.ConnectionsFile, "web database connection config file")
 	fs.Func("max-file-bytes", "maximum file size to collect, for example 512MiB or 536870912", func(value string) error {
 		parsed, err := parseBytes(value)
 		if err != nil {

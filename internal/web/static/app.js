@@ -7,6 +7,9 @@ const state = {
   selectedId: null,
   selectedTag: "",
   selectedIds: new Set(),
+  activePanel: "",
+  connections: [],
+  currentConnection: null,
 };
 
 const els = {
@@ -17,8 +20,27 @@ const els = {
   passwordInput: document.querySelector("#passwordInput"),
   loginMessage: document.querySelector("#loginMessage"),
   sessionUser: document.querySelector("#sessionUser"),
+  currentConnectionLabel: document.querySelector("#currentConnectionLabel"),
   logoutBtn: document.querySelector("#logoutBtn"),
   refreshBtn: document.querySelector("#refreshBtn"),
+  navItems: document.querySelectorAll(".nav-item"),
+  moduleDrawer: document.querySelector("#moduleDrawer"),
+  drawerTitle: document.querySelector("#drawerTitle"),
+  drawerSubtitle: document.querySelector("#drawerSubtitle"),
+  closeDrawerBtn: document.querySelector("#closeDrawerBtn"),
+  drawerPanels: document.querySelectorAll(".drawer-panel"),
+  connectionList: document.querySelector("#connectionList"),
+  connectionForm: document.querySelector("#connectionForm"),
+  connectionIdInput: document.querySelector("#connectionIdInput"),
+  connectionNameInput: document.querySelector("#connectionNameInput"),
+  connectionHostInput: document.querySelector("#connectionHostInput"),
+  connectionPortInput: document.querySelector("#connectionPortInput"),
+  connectionUserInput: document.querySelector("#connectionUserInput"),
+  connectionPasswordInput: document.querySelector("#connectionPasswordInput"),
+  connectionDatabaseInput: document.querySelector("#connectionDatabaseInput"),
+  testConnectionBtn: document.querySelector("#testConnectionBtn"),
+  resetConnectionBtn: document.querySelector("#resetConnectionBtn"),
+  connectionMessage: document.querySelector("#connectionMessage"),
   sourceType: document.querySelector("#sourceType"),
   sourceInput: document.querySelector("#sourceInput"),
   ingestBtn: document.querySelector("#ingestBtn"),
@@ -44,6 +66,9 @@ const els = {
   addTagBtn: document.querySelector("#addTagBtn"),
   assetPreview: document.querySelector("#assetPreview"),
   textPreview: document.querySelector("#textPreview"),
+  overviewDocumentCount: document.querySelector("#overviewDocumentCount"),
+  overviewSelectionCount: document.querySelector("#overviewSelectionCount"),
+  overviewFilterLabel: document.querySelector("#overviewFilterLabel"),
 };
 
 function storedApiToken() {
@@ -157,6 +182,33 @@ function showApp() {
   els.sessionUser.textContent = state.authRequired ? `已登录：${state.username}` : "本地免登录模式";
 }
 
+function openPanel(panelId) {
+  if (state.activePanel === panelId && panelId !== "overviewPanel") {
+    closePanel();
+    return;
+  }
+  state.activePanel = panelId;
+  els.moduleDrawer.classList.remove("hidden");
+  els.drawerPanels.forEach((panel) => {
+    panel.classList.toggle("hidden", panel.id !== panelId);
+  });
+  els.navItems.forEach((item) => {
+    item.classList.toggle("active", item.dataset.panel === panelId);
+  });
+  const panel = document.querySelector(`#${panelId}`);
+  els.drawerTitle.textContent = panel?.dataset.title || "功能面板";
+  els.drawerSubtitle.textContent = panel?.dataset.subtitle || "";
+  if (panelId === "databasePanel") loadConnections().catch(showConnectionError);
+  if (panelId === "overviewPanel") updateOverview();
+}
+
+function closePanel() {
+  state.activePanel = "";
+  els.moduleDrawer.classList.add("hidden");
+  els.drawerPanels.forEach((panel) => panel.classList.add("hidden"));
+  els.navItems.forEach((item) => item.classList.remove("active"));
+}
+
 function assetURL(id) {
   const token = storedApiToken();
   const suffix = token ? `?access_token=${encodeURIComponent(token)}` : "";
@@ -194,6 +246,7 @@ async function loadDocuments() {
   const knownIDs = new Set(state.documents.map((doc) => doc.id));
   state.selectedIds = new Set([...state.selectedIds].filter((id) => knownIDs.has(id)));
   renderDocuments();
+  updateOverview();
 }
 
 async function loadTags() {
@@ -218,11 +271,133 @@ async function loadTags() {
   });
 }
 
+async function loadConnections() {
+  const payload = await api("/api/connections");
+  state.connections = payload.connections || [];
+  state.currentConnection = payload.current || null;
+  renderConnections();
+}
+
+function renderConnections() {
+  const current = state.currentConnection;
+  els.currentConnectionLabel.textContent = current
+    ? `当前数据库：${current.name} (${current.host}:${current.port}/${current.database})`
+    : "当前数据库：未选择";
+  els.connectionList.innerHTML = state.connections.length
+    ? state.connections.map((conn) => {
+        const active = conn.active ? " active" : "";
+        const passwordState = conn.has_password ? "已配置密码" : "无密码";
+        return `
+          <article class="connection-row${active}" data-connection-id="${escapeHtml(conn.id)}">
+            <button class="connection-main" type="button" data-edit-connection="${escapeHtml(conn.id)}">
+              <strong>${escapeHtml(conn.name)}</strong>
+              <span>${escapeHtml(conn.host)}:${conn.port} / ${escapeHtml(conn.database)}</span>
+              <small>${escapeHtml(conn.user)} · ${passwordState}</small>
+            </button>
+            <button class="mini-button" type="button" data-activate-connection="${escapeHtml(conn.id)}">${conn.active ? "当前" : "使用"}</button>
+          </article>
+        `;
+      }).join("")
+    : `<div class="empty-state compact">暂无连接配置。</div>`;
+
+  els.connectionList.querySelectorAll("[data-edit-connection]").forEach((node) => {
+    node.addEventListener("click", () => fillConnectionForm(node.dataset.editConnection));
+  });
+  els.connectionList.querySelectorAll("[data-activate-connection]").forEach((node) => {
+    node.addEventListener("click", () => activateConnection(node.dataset.activateConnection));
+  });
+}
+
+function fillConnectionForm(id) {
+  const conn = state.connections.find((item) => item.id === id);
+  if (!conn) return;
+  els.connectionIdInput.value = conn.id;
+  els.connectionNameInput.value = conn.name || "";
+  els.connectionHostInput.value = conn.host || "";
+  els.connectionPortInput.value = conn.port || 4000;
+  els.connectionUserInput.value = conn.user || "";
+  els.connectionPasswordInput.value = "";
+  els.connectionDatabaseInput.value = conn.database || "";
+  els.connectionMessage.textContent = conn.has_password ? "已加载连接，密码留空将保留原密码。" : "已加载连接。";
+}
+
+function resetConnectionForm() {
+  els.connectionIdInput.value = "";
+  els.connectionNameInput.value = "";
+  els.connectionHostInput.value = "";
+  els.connectionPortInput.value = "4000";
+  els.connectionUserInput.value = "";
+  els.connectionPasswordInput.value = "";
+  els.connectionDatabaseInput.value = "";
+  els.connectionMessage.textContent = "";
+}
+
+function connectionPayload() {
+  return {
+    id: els.connectionIdInput.value.trim(),
+    name: els.connectionNameInput.value.trim(),
+    host: els.connectionHostInput.value.trim(),
+    port: Number(els.connectionPortInput.value || 4000),
+    user: els.connectionUserInput.value.trim(),
+    password: els.connectionPasswordInput.value,
+    database: els.connectionDatabaseInput.value.trim(),
+  };
+}
+
+async function saveConnection(event) {
+  event.preventDefault();
+  els.connectionMessage.textContent = "正在保存...";
+  try {
+    await api("/api/connections", {
+      method: "POST",
+      body: JSON.stringify(connectionPayload()),
+    });
+    resetConnectionForm();
+    await loadConnections();
+    els.connectionMessage.textContent = "连接已保存。";
+  } catch (error) {
+    if (error.message !== "unauthorized") showConnectionError(error);
+  }
+}
+
+async function testConnection() {
+  els.connectionMessage.textContent = "正在测试连接...";
+  try {
+    await api("/api/connections/test", {
+      method: "POST",
+      body: JSON.stringify(connectionPayload()),
+    });
+    els.connectionMessage.textContent = "连接测试通过。";
+  } catch (error) {
+    if (error.message !== "unauthorized") showConnectionError(error);
+  }
+}
+
+async function activateConnection(id) {
+  els.connectionMessage.textContent = "正在切换数据库...";
+  try {
+    await api(`/api/connections/${encodeURIComponent(id)}/activate`, { method: "POST" });
+    els.connectionMessage.textContent = "当前数据库已切换。";
+    state.selectedId = null;
+    state.selectedIds.clear();
+    els.detailEmpty.classList.remove("hidden");
+    els.detailView.classList.add("hidden");
+    await Promise.all([loadConnections(), refresh()]);
+  } catch (error) {
+    if (error.message !== "unauthorized") showConnectionError(error);
+  }
+}
+
+function showConnectionError(error) {
+  els.connectionMessage.textContent = error.message || "数据库连接操作失败。";
+}
+
 function renderDocuments() {
   const docs = visibleDocuments();
   els.documentCount.textContent = `${docs.length} 条内容`;
   els.activeFilter.textContent = state.selectedTag ? `标签：${state.selectedTag}` : "";
   els.selectionSummary.textContent = state.selectedIds.size ? `已选 ${state.selectedIds.size}` : "未选择";
+  updateOverview();
 
   els.documentList.innerHTML = docs.length
     ? docs.map((doc) => {
@@ -251,6 +426,13 @@ function renderDocuments() {
   els.documentList.querySelectorAll("[data-select-id]").forEach((node) => {
     node.addEventListener("change", () => toggleSelection(Number(node.dataset.selectId), node.checked));
   });
+}
+
+function updateOverview() {
+  if (!els.overviewDocumentCount) return;
+  els.overviewDocumentCount.textContent = String(visibleDocuments().length);
+  els.overviewSelectionCount.textContent = String(state.selectedIds.size);
+  els.overviewFilterLabel.textContent = state.selectedTag || "全部";
 }
 
 function toggleSelection(id, selected) {
@@ -348,7 +530,8 @@ async function addBatchTags() {
 }
 
 async function refresh() {
-  await Promise.all([loadDocuments(), loadTags()]);
+  await Promise.all([loadDocuments(), loadTags(), loadConnections()]);
+  updateOverview();
 }
 
 function showLoadError(error) {
@@ -358,6 +541,13 @@ function showLoadError(error) {
 els.loginForm.addEventListener("submit", login);
 els.logoutBtn.addEventListener("click", logout);
 els.refreshBtn.addEventListener("click", () => refresh().catch(showLoadError));
+els.navItems.forEach((item) => {
+  item.addEventListener("click", () => openPanel(item.dataset.panel));
+});
+els.closeDrawerBtn.addEventListener("click", closePanel);
+els.connectionForm.addEventListener("submit", saveConnection);
+els.testConnectionBtn.addEventListener("click", testConnection);
+els.resetConnectionBtn.addEventListener("click", resetConnectionForm);
 els.searchBtn.addEventListener("click", () => loadDocuments().catch(showLoadError));
 els.searchInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") loadDocuments().catch(showLoadError);

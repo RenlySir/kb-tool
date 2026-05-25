@@ -14,6 +14,7 @@ services:
       KB_TOOL_API_TOKEN: ${KB_TOOL_API_TOKEN:-dev-token}
       KB_TOOL_ADMIN_USER: ${KB_TOOL_ADMIN_USER:-admin}
       KB_TOOL_ADMIN_PASSWORD: ${KB_TOOL_ADMIN_PASSWORD:-admin123}
+      KB_TOOL_CONNECTIONS_FILE: /data/connections.json
       KB_TOOL_MAX_FILE_BYTES: ${KB_TOOL_MAX_FILE_BYTES:-512MiB}
       KB_TOOL_MAX_TEXT_BYTES: ${KB_TOOL_MAX_TEXT_BYTES:-2MiB}
     command:
@@ -23,6 +24,7 @@ services:
     working_dir: /workspace
     volumes:
       - .:/workspace:ro
+      - kb-tool-data:/data
     ports:
       - "8080:8080"
 
@@ -34,3 +36,6 @@ services:
     ports:
       - "4000:4000"
       - "10080:10080"
+
+volumes:
+  kb-tool-data:
