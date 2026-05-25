@@ -1,88 +1,211 @@
 # kb-tool
 
-`kb-tool` is a Go CLI for ingesting local files, directories, GitHub repositories, and GitLab repositories into a TiDB-backed knowledge base. It extracts text documents, applies deterministic tags, and stores documents plus tag relationships in TiDB through the MySQL protocol.
+`kb-tool` is a Go command-line tool for building a small TiDB-backed knowledge base from local files, directories, GitHub repositories, and GitLab repositories. It collects text content, generates deterministic rule-based tags, stores documents and tag mappings in TiDB, and provides a CLI search command.
 
-## Features
+The current implementation is the first usable core. It is intentionally lightweight: TiDB is the storage backend, Git is used for repository ingestion, and the tagger is rule based so the tool works offline. The architecture leaves room for later Unstructured parsing, AI metadata extraction, embeddings, MinIO, Dify, Airweave, and MCP integrations.
 
-- Ingest a single file, a directory tree, a GitHub URL, or a GitLab URL.
-- Skip binary files and noisy folders such as `.git`, `node_modules`, `vendor`, `dist`, and `target`.
-- Assign stable rule-based tags such as `go`, `tidb`, `mysql`, `database`, `github`, and `knowledge-base`.
-- Create and migrate TiDB tables automatically.
-- Search ingested content from the CLI.
+## What It Does Today
+
+- Ingest a single text file, a directory tree, a GitHub repository URL, or a GitLab repository URL.
+- Shallow-clone Git repositories with `git clone --depth 1`.
+- Skip binary files and noisy folders such as `.git`, `node_modules`, `vendor`, `dist`, `build`, and `target`.
+- Infer a simple language value from file extension.
+- Generate stable tags from language, path, title, and content keywords.
+- Create the TiDB schema automatically.
+- Upsert documents by `(content_hash, path)` to avoid duplicates on repeated ingestion.
+- Search document title, path, and content from the CLI.
+
+## Roadmap
+
+Planned extensions are documented in [docs/operation-manual.md](docs/operation-manual.md):
+
+- Unstructured-based parsing for PDF, Word, PPT, Markdown, TXT, images, and video-derived text.
+- LangExtract-style structured metadata extraction for authors, dates, entities, and relations.
+- Manual tags, rule tags, and AI-generated tags with review status and confidence.
+- Chunking, embedding, and vector search.
+- MinIO for raw object storage.
+- Dify Knowledge Pipeline and Airweave adapters.
+- MCP server for AI agents.
 
 ## Requirements
 
 - Go 1.24 or newer.
-- Git CLI for repository ingestion.
+- Git CLI for GitHub/GitLab repository ingestion.
 - TiDB reachable through the MySQL protocol.
+- Docker Compose, only if you want to use the included local TiDB service.
 
-For local testing, start TiDB with:
+## Quick Start
+
+Start a local TiDB:
 
 ```bash
 docker compose up -d tidb
 ```
 
-## Build
+Build the CLI:
 
 ```bash
 go build ./cmd/kb-tool
 ```
 
-## Configure TiDB
-
-Defaults target a local TiDB instance:
-
-```text
-TIDB_HOST=127.0.0.1
-TIDB_PORT=4000
-TIDB_USER=root
-TIDB_PASSWORD=
-TIDB_DATABASE=kb
-```
-
-You can use environment variables or flags:
+Create the schema:
 
 ```bash
-kb-tool migrate \
+./kb-tool migrate
+```
+
+Ingest a local directory:
+
+```bash
+./kb-tool ingest ./docs
+```
+
+Ingest a GitHub repository:
+
+```bash
+./kb-tool ingest https://github.com/RenlySir/kb-tool.git
+```
+
+Search:
+
+```bash
+./kb-tool search tidb
+```
+
+## Configuration
+
+The CLI reads TiDB settings from environment variables and command flags. Flags override environment variables.
+
+| Setting | Environment Variable | Flag | Default |
+| --- | --- | --- | --- |
+| TiDB host | `TIDB_HOST` | `-tidb-host` | `127.0.0.1` |
+| TiDB port | `TIDB_PORT` | `-tidb-port` | `4000` |
+| TiDB user | `TIDB_USER` | `-tidb-user` | `root` |
+| TiDB password | `TIDB_PASSWORD` | `-tidb-password` | empty |
+| TiDB database | `TIDB_DATABASE` | `-tidb-database` | `kb` |
+| Search limit | none | `-limit` | `20` |
+
+Example:
+
+```bash
+TIDB_HOST=127.0.0.1 \
+TIDB_PORT=4000 \
+TIDB_USER=root \
+TIDB_DATABASE=kb \
+./kb-tool migrate
+```
+
+The same configuration with flags:
+
+```bash
+./kb-tool migrate \
   -tidb-host 127.0.0.1 \
   -tidb-port 4000 \
   -tidb-user root \
   -tidb-database kb
 ```
 
-## Usage
+## Commands
 
-Migrate schema:
+### `migrate`
+
+Creates the TiDB database if it does not exist, then creates the knowledge-base tables.
 
 ```bash
-kb-tool migrate
+./kb-tool migrate
 ```
 
-Ingest a local directory:
+### `ingest`
+
+Collects documents from a file, directory, GitHub URL, or GitLab URL, generates tags, and writes everything to TiDB.
 
 ```bash
-kb-tool ingest /path/to/docs
+./kb-tool ingest <file|directory|github-url|gitlab-url>
 ```
 
-Ingest GitHub or GitLab repositories:
+Examples:
 
 ```bash
-kb-tool ingest https://github.com/RenlySir/kb-tool.git
-kb-tool ingest git@gitlab.com:group/project.git
+./kb-tool ingest ./README.md
+./kb-tool ingest ./docs
+./kb-tool ingest https://github.com/RenlySir/kb-tool.git
+./kb-tool ingest git@gitlab.com:group/project.git
 ```
 
-Search:
+### `search`
+
+Searches title, path, and content with a SQL `LIKE` query and prints matching snippets.
 
 ```bash
-kb-tool search tidb
+./kb-tool search "knowledge base"
+./kb-tool search -limit 5 tidb
 ```
 
 ## Schema
 
-The tool creates three tables:
+The current version creates three tables:
 
 - `kb_documents`: document metadata and full text.
 - `kb_tags`: normalized tag names.
 - `kb_document_tags`: many-to-many document/tag links.
 
 Documents are upserted by `(content_hash, path)`, so repeated ingestion updates existing rows instead of duplicating unchanged files.
+
+## Architecture
+
+```text
+Input source
+  ├─ local file
+  ├─ local directory
+  ├─ GitHub repository
+  └─ GitLab repository
+        ↓
+source collector
+        ↓
+rule-based tagger
+        ↓
+ingest service
+        ↓
+TiDB store
+        ↓
+CLI search
+```
+
+Main packages:
+
+- `cmd/kb-tool`: CLI parsing and command execution.
+- `internal/source`: local file collector, Git remote parser, and Git repository collector.
+- `internal/tagger`: deterministic rule-based tag generator.
+- `internal/ingest`: orchestration of collect, tag, migrate, and save.
+- `internal/store`: TiDB schema, upsert, tag linking, and search.
+
+## Development
+
+Run tests:
+
+```bash
+go test ./...
+```
+
+Build:
+
+```bash
+go build ./cmd/kb-tool
+```
+
+Format:
+
+```bash
+gofmt -w cmd internal
+```
+
+## Current Limits
+
+- No PDF, Word, PPT, image, or video parsing yet.
+- No chunking or embedding yet.
+- No vector search yet.
+- No MinIO object storage yet.
+- No manual tag review workflow yet.
+- Git repository ingestion uses a temporary shallow clone and requires local Git credentials for private repositories.
+
+See [docs/operation-manual.md](docs/operation-manual.md) for operating steps, troubleshooting, and the recommended expansion plan.
