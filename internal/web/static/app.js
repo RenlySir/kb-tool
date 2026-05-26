@@ -10,6 +10,7 @@ const state = {
   activePanel: "",
   connections: [],
   currentConnection: null,
+  overview: null,
 };
 
 const els = {
@@ -67,8 +68,13 @@ const els = {
   assetPreview: document.querySelector("#assetPreview"),
   textPreview: document.querySelector("#textPreview"),
   overviewDocumentCount: document.querySelector("#overviewDocumentCount"),
+  overviewTagCount: document.querySelector("#overviewTagCount"),
+  overviewAssetCount: document.querySelector("#overviewAssetCount"),
   overviewSelectionCount: document.querySelector("#overviewSelectionCount"),
   overviewFilterLabel: document.querySelector("#overviewFilterLabel"),
+  overviewSourceTypes: document.querySelector("#overviewSourceTypes"),
+  overviewLanguages: document.querySelector("#overviewLanguages"),
+  overviewRecentDocuments: document.querySelector("#overviewRecentDocuments"),
 };
 
 function storedApiToken() {
@@ -271,6 +277,12 @@ async function loadTags() {
   });
 }
 
+async function loadOverview() {
+  const payload = await api("/api/overview");
+  state.overview = payload.overview || null;
+  updateOverview();
+}
+
 async function loadConnections() {
   const payload = await api("/api/connections");
   state.connections = payload.connections || [];
@@ -428,11 +440,66 @@ function renderDocuments() {
   });
 }
 
+function renderCountBars(container, items = []) {
+  if (!container) return;
+  if (!items.length) {
+    container.innerHTML = `<div class="empty-state compact">暂无统计数据。</div>`;
+    return;
+  }
+  const max = Math.max(...items.map((item) => Number(item.count) || 0), 1);
+  container.innerHTML = items.slice(0, 6).map((item) => {
+    const count = Number(item.count) || 0;
+    const width = Math.max(6, Math.round((count / max) * 100));
+    return `
+      <div class="mini-bar">
+        <div class="mini-bar-label">
+          <span>${escapeHtml(item.name || "unknown")}</span>
+          <strong>${count}</strong>
+        </div>
+        <div class="mini-bar-track">
+          <span style="width:${width}%"></span>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderRecentDocuments(docs = []) {
+  if (!els.overviewRecentDocuments) return;
+  if (!docs.length) {
+    els.overviewRecentDocuments.innerHTML = `<div class="empty-state compact">暂无最近入库内容。</div>`;
+    return;
+  }
+  els.overviewRecentDocuments.innerHTML = docs.slice(0, 6).map((doc) => {
+    const title = doc.title || doc.path || `Document ${doc.id}`;
+    const meta = `${doc.source_type || "file"} · ${doc.mime_type || "unknown"}`;
+    return `
+      <button class="recent-row" type="button" data-recent-id="${doc.id}">
+        <span>
+          <strong>${escapeHtml(title)}</strong>
+          <small>${escapeHtml(meta)}</small>
+        </span>
+        <span class="tag-list">${tagHtml(doc.tags || [])}</span>
+      </button>
+    `;
+  }).join("");
+  els.overviewRecentDocuments.querySelectorAll("[data-recent-id]").forEach((node) => {
+    node.addEventListener("click", () => selectDocument(Number(node.dataset.recentId)));
+  });
+}
+
 function updateOverview() {
   if (!els.overviewDocumentCount) return;
-  els.overviewDocumentCount.textContent = String(visibleDocuments().length);
+  const overview = state.overview;
+  const assetCount = overview ? Number(overview.image_documents || overview.binary_documents || 0) : 0;
+  els.overviewDocumentCount.textContent = String(overview?.total_documents ?? visibleDocuments().length);
+  els.overviewTagCount.textContent = String(overview?.total_tags ?? 0);
+  els.overviewAssetCount.textContent = String(assetCount);
   els.overviewSelectionCount.textContent = String(state.selectedIds.size);
   els.overviewFilterLabel.textContent = state.selectedTag || "全部";
+  renderCountBars(els.overviewSourceTypes, overview?.source_types || []);
+  renderCountBars(els.overviewLanguages, overview?.languages || []);
+  renderRecentDocuments(overview?.recent_documents || []);
 }
 
 function toggleSelection(id, selected) {
@@ -530,7 +597,7 @@ async function addBatchTags() {
 }
 
 async function refresh() {
-  await Promise.all([loadDocuments(), loadTags(), loadConnections()]);
+  await Promise.all([loadDocuments(), loadTags(), loadConnections(), loadOverview()]);
   updateOverview();
 }
 

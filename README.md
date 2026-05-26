@@ -218,8 +218,8 @@ Starts the built-in Web UI and REST API from one process:
 
 Access surfaces:
 
-- Web UI: login with an admin account, use a management-system layout with collapsed functional modules, create/test/select TiDB database connections, choose a source/project type, batch import local paths and Git repositories, select multiple documents, add tags in bulk, inspect documents, edit tags, filter by tags, and preview images directly in the browser.
-- REST API: external systems can ingest sources, list documents, search, read document detail, fetch image assets, and manage tags.
+- Web UI: login with an admin account, use a management-system layout with collapsed functional modules, view the knowledge-base overview, create/test/select TiDB database connections, choose a source/project type, batch import local paths and Git repositories, select multiple documents, add tags in bulk, inspect documents, edit tags, filter by tags, and preview images directly in the browser.
+- REST API: external systems can read the overview, ingest sources, list documents, search, read document detail, fetch image assets, and manage tags.
 
 For external binding, configure an API token:
 
@@ -237,11 +237,14 @@ The database manager stores TiDB connection profiles in `KB_TOOL_CONNECTIONS_FIL
 Database connection management endpoints:
 
 ```http
+GET    /api/overview
 GET    /api/connections
 POST   /api/connections
 POST   /api/connections/test
 POST   /api/connections/{id}/activate
 ```
+
+`GET /api/overview` returns total documents, total tags, image/binary asset counts, source distribution, content type distribution, and recent documents. The Web UI uses it as the first knowledge-management dashboard before users drill into import, tagging, filtering, and document detail.
 
 Example connection payload:
 

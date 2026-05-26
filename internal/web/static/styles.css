@@ -342,7 +342,8 @@ textarea {
 .panel-grid,
 .form-grid,
 .connection-layout,
-.overview-grid {
+.overview-grid,
+.insight-grid {
   display: grid;
   gap: 12px;
 }
@@ -433,7 +434,7 @@ textarea {
 }
 
 .overview-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .metric-tile {
@@ -451,6 +452,106 @@ textarea {
   font-size: 20px;
   line-height: 1.1;
   overflow-wrap: anywhere;
+}
+
+.insight-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.insight-section {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.insight-section.wide {
+  grid-column: 1 / -1;
+}
+
+.section-heading.compact {
+  min-height: 24px;
+}
+
+.mini-bars,
+.recent-list {
+  display: grid;
+  gap: 8px;
+}
+
+.mini-bar {
+  display: grid;
+  gap: 5px;
+}
+
+.mini-bar-label {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 12px;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.mini-bar-label span {
+  overflow-wrap: anywhere;
+}
+
+.mini-bar-label strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.mini-bar-track {
+  background: #dfe8ee;
+  border-radius: 999px;
+  height: 7px;
+  overflow: hidden;
+}
+
+.mini-bar-track span {
+  background: var(--accent);
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+}
+
+.recent-row {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--border);
+  color: var(--text);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, auto);
+  justify-content: stretch;
+  min-height: 54px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.recent-row:hover {
+  background: var(--surface-soft);
+}
+
+.recent-row strong,
+.recent-row small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.recent-row strong {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.recent-row small {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 3px;
 }
 
 .form-actions {
@@ -782,9 +883,15 @@ pre {
   .panel-grid,
   .form-grid,
   .overview-grid,
+  .insight-grid,
+  .recent-row,
   .list-toolbar,
   .inline-editor {
     grid-template-columns: 1fr;
+  }
+
+  .insight-section.wide {
+    grid-column: auto;
   }
 
   .topbar,

@@ -546,6 +546,11 @@ Primary screens:
   - The Web UI uses an admin-system layout.
   - Functional modules are collapsed by default in the left navigation.
   - Click Database Management, Import, Tag Management, or Tag Filter to expand the matching drawer.
+- Knowledge overview:
+  - Show total knowledge items, total tags, image/binary assets, selected items, and current filter.
+  - Show source distribution so operators can see whether content came from files, GitHub, GitLab, Office documents, images, or other sources.
+  - Show content type distribution based on parsed language or MIME type.
+  - Show recently ingested documents and allow opening detail from the overview.
 - Database management:
   - Create TiDB connection profiles with name, IP/host, port, username, password, and database.
   - Test a connection before using it.
@@ -589,6 +594,7 @@ Endpoints:
 GET    /api/health
 GET    /api/session
 POST   /api/login
+GET    /api/overview
 GET    /api/connections
 POST   /api/connections
 POST   /api/connections/test
@@ -604,6 +610,22 @@ POST   /api/documents/{id}/tags
 ```
 
 `DELETE /api/documents/{id}/tags/{tag}` is planned and not implemented yet.
+
+`GET /api/overview` returns a management summary used by the Web UI dashboard:
+
+```json
+{
+  "overview": {
+    "total_documents": 128,
+    "total_tags": 36,
+    "binary_documents": 14,
+    "image_documents": 9,
+    "source_types": [{"name": "file", "count": 80}],
+    "languages": [{"name": "markdown", "count": 42}],
+    "recent_documents": [{"id": 12, "title": "README.md", "source_type": "github"}]
+  }
+}
+```
 
 Example connection request:
 

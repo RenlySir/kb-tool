@@ -273,6 +273,69 @@ func TestServerManagesDatabaseConnections(t *testing.T) {
 	}
 }
 
+func TestServerReturnsKnowledgeOverview(t *testing.T) {
+	repo := &fakeRepository{
+		documents: []store.DocumentRecord{
+			{
+				ID:         11,
+				SourceType: "github",
+				Path:       "README.md",
+				Title:      "README.md",
+				Language:   "markdown",
+				MimeType:   "text/markdown; charset=utf-8",
+				Tags:       []string{"文档"},
+			},
+			{
+				ID:         12,
+				SourceType: "file",
+				Path:       "images/arch.png",
+				Title:      "arch.png",
+				MimeType:   "image/png",
+				IsBinary:   true,
+				Tags:       []string{"架构"},
+			},
+			{
+				ID:         13,
+				SourceType: "file",
+				Path:       "spec.doc",
+				Title:      "spec.doc",
+				MimeType:   "application/msword",
+				IsBinary:   true,
+			},
+		},
+		tags: []store.TagRecord{
+			{Name: "文档", Count: 1},
+			{Name: "架构", Count: 1},
+		},
+	}
+	server := web.NewServer(web.Config{}, repo, nil)
+
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/overview", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("overview status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Overview web.Overview `json:"overview"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode overview: %v", err)
+	}
+	if response.Overview.TotalDocuments != 3 || response.Overview.TotalTags != 2 {
+		t.Fatalf("unexpected totals: %#v", response.Overview)
+	}
+	if response.Overview.BinaryDocuments != 2 || response.Overview.ImageDocuments != 1 {
+		t.Fatalf("unexpected asset totals: %#v", response.Overview)
+	}
+	if len(response.Overview.SourceTypes) == 0 || response.Overview.SourceTypes[0].Name != "file" || response.Overview.SourceTypes[0].Count != 2 {
+		t.Fatalf("unexpected source type counts: %#v", response.Overview.SourceTypes)
+	}
+	if len(response.Overview.RecentDocuments) != 3 || response.Overview.RecentDocuments[0].ID != 11 {
+		t.Fatalf("unexpected recent documents: %#v", response.Overview.RecentDocuments)
+	}
+}
+
 type addTagCall struct {
 	documentID int64
 	tags       []string
@@ -280,6 +343,7 @@ type addTagCall struct {
 
 type fakeRepository struct {
 	documents   []store.DocumentRecord
+	tags        []store.TagRecord
 	asset       store.AssetRecord
 	addTagCalls []addTagCall
 	lastSearch  string
@@ -344,6 +408,9 @@ func (r *fakeRepository) GetAsset(ctx context.Context, id int64) (store.AssetRec
 }
 
 func (r *fakeRepository) ListTags(ctx context.Context) ([]store.TagRecord, error) {
+	if r.tags != nil {
+		return r.tags, nil
+	}
 	return []store.TagRecord{{Name: "documentation", Count: 1}}, nil
 }
 

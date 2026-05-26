@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -76,6 +77,30 @@ type IngestSourceResult struct {
 	Error      string `json:"error,omitempty"`
 }
 
+type Overview struct {
+	TotalDocuments  int                `json:"total_documents"`
+	TotalTags       int                `json:"total_tags"`
+	BinaryDocuments int                `json:"binary_documents"`
+	ImageDocuments  int                `json:"image_documents"`
+	SourceTypes     []OverviewCount    `json:"source_types"`
+	Languages       []OverviewCount    `json:"languages"`
+	RecentDocuments []OverviewDocument `json:"recent_documents"`
+}
+
+type OverviewCount struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+type OverviewDocument struct {
+	ID         int64    `json:"id"`
+	Title      string   `json:"title"`
+	Path       string   `json:"path"`
+	SourceType string   `json:"source_type"`
+	MimeType   string   `json:"mime_type"`
+	Tags       []string `json:"tags"`
+}
+
 type Server struct {
 	config            Config
 	repo              Repository
@@ -105,6 +130,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/health", s.handleHealth)
 	s.mux.HandleFunc("/api/session", s.handleSession)
 	s.mux.HandleFunc("/api/login", s.handleLogin)
+	s.mux.HandleFunc("/api/overview", s.handleOverview)
 	s.mux.HandleFunc("/api/documents", s.handleDocuments)
 	s.mux.HandleFunc("/api/documents/tags", s.handleBatchTags)
 	s.mux.HandleFunc("/api/documents/", s.handleDocument)
@@ -191,6 +217,57 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		"token":    s.config.APIToken,
 		"username": s.adminUser(),
 	})
+}
+
+func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	docs, err := s.repo.ListDocuments(r.Context(), store.DocumentFilter{Limit: 1000})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	tags, err := s.repo.ListTags(r.Context())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	sourceCounts := make(map[string]int)
+	languageCounts := make(map[string]int)
+	overview := Overview{
+		TotalDocuments: len(docs),
+		TotalTags:      len(tags),
+	}
+	for _, doc := range docs {
+		sourceCounts[labelOrDefault(doc.SourceType, "unknown")]++
+		if doc.Language != "" {
+			languageCounts[doc.Language]++
+		} else if doc.MimeType != "" {
+			languageCounts[doc.MimeType]++
+		}
+		if doc.IsBinary {
+			overview.BinaryDocuments++
+		}
+		if strings.HasPrefix(doc.MimeType, "image/") {
+			overview.ImageDocuments++
+		}
+		if len(overview.RecentDocuments) < 8 {
+			overview.RecentDocuments = append(overview.RecentDocuments, OverviewDocument{
+				ID:         doc.ID,
+				Title:      doc.Title,
+				Path:       doc.Path,
+				SourceType: doc.SourceType,
+				MimeType:   doc.MimeType,
+				Tags:       doc.Tags,
+			})
+		}
+	}
+	overview.SourceTypes = sortedOverviewCounts(sourceCounts)
+	overview.Languages = sortedOverviewCounts(languageCounts)
+	writeJSON(w, http.StatusOK, map[string]any{"overview": overview})
 }
 
 func (s *Server) handleDocuments(w http.ResponseWriter, r *http.Request) {
@@ -438,6 +515,28 @@ func (s *Server) handleConnectionAction(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, view)
+}
+
+func labelOrDefault(value string, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func sortedOverviewCounts(counts map[string]int) []OverviewCount {
+	items := make([]OverviewCount, 0, len(counts))
+	for name, count := range counts {
+		items = append(items, OverviewCount{Name: name, Count: count})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Count == items[j].Count {
+			return items[i].Name < items[j].Name
+		}
+		return items[i].Count > items[j].Count
+	})
+	return items
 }
 
 func cleanTags(tags []string) []string {
