@@ -372,6 +372,37 @@ Output format:
 
 The current search is SQL keyword search over document title, path, and content. Vector search is planned but not implemented yet.
 
+## 8.1 Text Chunking
+
+The ingest pipeline now runs a Go-native recursive text splitter after source collection and before persistence. The current release uses chunks as a stable pipeline boundary for later embedding and semantic retrieval; it does not persist chunks into a separate TiDB table yet.
+
+Default behavior:
+
+- Chunk size: `1024` runes.
+- Chunk overlap: `128` runes.
+- Separators: paragraph, line, Chinese full stop, English full stop, space, then hard rune splitting.
+
+Configure through environment variables:
+
+```bash
+export KB_TOOL_CHUNK_SIZE=512
+export KB_TOOL_CHUNK_OVERLAP=64
+./kb-tool ingest ./docs
+```
+
+Or through CLI flags:
+
+```bash
+./kb-tool ingest -chunk-size 512 -chunk-overlap 64 ./docs
+./kb-tool server -chunk-size 1024 -chunk-overlap 128
+```
+
+The CLI ingest output includes the generated chunk count:
+
+```text
+ingested 4 documents with 12 chunks and 18 tag assignments
+```
+
 ## 9. Tagging Behavior
 
 The current tagger is deterministic and rule based.
@@ -764,7 +795,7 @@ The Web UI obtains the API token through `/api/login` and sends it through reque
 
 ## 13. Planned LLM Connection and AI Tagging
 
-This section describes the planned LLM integration for AI-assisted tagging. It is not implemented in the current CLI-only release.
+This section describes the LLM integration direction for AI-assisted tagging. The current codebase has stable Go interfaces for parser, tag-generation, and embedding providers under `internal/intelligence`, but concrete HTTP providers and persistence of AI-generated tags are still planned.
 
 ### 13.1 Goals
 
@@ -772,7 +803,7 @@ The AI tagger should add intelligent tags without replacing deterministic rule t
 
 Required behavior:
 
-- Connect to different model providers through a stable provider interface.
+- Connect to different model providers through the stable `internal/intelligence.TagGenerator` interface.
 - Generate tags from document text, source metadata, existing rule tags, and optional extracted entities.
 - Return structured JSON instead of free-form prose.
 - Store every AI-generated tag assignment with source, model, confidence, evidence, and review status.
@@ -780,7 +811,7 @@ Required behavior:
 
 ### 13.2 Provider Types
 
-The planned provider abstraction should support:
+The provider abstraction should support:
 
 - OpenAI-compatible APIs:
   - OpenAI
@@ -850,6 +881,30 @@ The AI tagger should receive a compact input:
 ```
 
 The prompt should ask the model to produce concise, normalized tags and evidence. It should avoid sending full oversized documents when selected chunks are enough.
+
+### 13.4.1 Go Interfaces
+
+External intelligent capabilities are intentionally modeled as Go interfaces so the main service remains Go-native while AI-heavy work can run in external HTTP services:
+
+```go
+type Parser interface {
+    Parse(ctx context.Context, input ParseInput) (ParseResult, error)
+}
+
+type TagGenerator interface {
+    GenerateTags(ctx context.Context, input TagInput) ([]TagProposal, error)
+}
+
+type Embedder interface {
+    Embed(ctx context.Context, input EmbedInput) (Embedding, error)
+}
+```
+
+Expected adapters:
+
+- `Parser`: Unstructured API, Apache Tika, OCR service, or internal document parser.
+- `TagGenerator`: Ollama, OpenAI-compatible chat API, or internal enterprise LLM gateway.
+- `Embedder`: Ollama embeddings, HuggingFace TEI, OpenAI-compatible embeddings, or internal embedding service.
 
 ### 13.5 AI Tagging Response
 
@@ -1060,7 +1115,8 @@ The intended production-grade roadmap is:
 
 - Use Unstructured for Markdown and TXT parsing through a Python worker.
 - Keep rule-based tagging.
-- Add chunk tables and an embedding pipeline interface.
+- Use the current Go recursive splitter as the chunking boundary.
+- Add chunk tables and connect the existing embedding pipeline interface to an external embedding service.
 - Use TiDB as the only planned relation and vector storage backend. For local development, start with exact vector search without HNSW indexing so TiFlash is not required.
 
 ### Phase 2: More Sources and Metadata

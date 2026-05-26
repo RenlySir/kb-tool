@@ -15,6 +15,7 @@ import (
 	"github.com/RenlySir/kb-tool/internal/ingest"
 	"github.com/RenlySir/kb-tool/internal/kb"
 	"github.com/RenlySir/kb-tool/internal/source"
+	"github.com/RenlySir/kb-tool/internal/splitter"
 	"github.com/RenlySir/kb-tool/internal/store"
 	"github.com/RenlySir/kb-tool/internal/tagger"
 	"github.com/RenlySir/kb-tool/internal/web"
@@ -30,6 +31,8 @@ type config struct {
 	AdminUser       string
 	AdminPassword   string
 	ConnectionsFile string
+	ChunkSize       int
+	ChunkOverlap    int
 	TiDB            store.Config
 	File            source.FileCollectorOptions
 }
@@ -70,12 +73,12 @@ func run(ctx context.Context, cfg config) error {
 			return err
 		}
 		defer kbStore.Close()
-		service := ingest.NewService(source.NewAutoCollectorWithOptions(cfg.File), tagger.NewRuleBasedTagger(), kbStore)
+		service := newIngestService(cfg, kbStore)
 		result, err := service.Ingest(ctx, cfg.Input)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("ingested %d documents with %d tag assignments\n", result.Documents, result.Tags)
+		fmt.Printf("ingested %d documents with %d chunks and %d tag assignments\n", result.Documents, result.Chunks, result.Tags)
 		return nil
 	case "search":
 		kbStore, err := store.Open(ctx, cfg.TiDB)
@@ -101,7 +104,7 @@ func run(ctx context.Context, cfg config) error {
 			return err
 		}
 		defer manager.Close()
-		service := ingest.NewService(source.NewAutoCollectorWithOptions(cfg.File), tagger.NewRuleBasedTagger(), manager)
+		service := newIngestService(cfg, manager)
 		server := web.NewServer(web.Config{
 			APIToken:      cfg.APIToken,
 			AdminUser:     cfg.AdminUser,
@@ -115,6 +118,18 @@ func run(ctx context.Context, cfg config) error {
 	default:
 		return fmt.Errorf("unknown command %q", cfg.Command)
 	}
+}
+
+func newIngestService(cfg config, storage ingest.Store) *ingest.Service {
+	return ingest.NewService(
+		source.NewAutoCollectorWithOptions(cfg.File),
+		tagger.NewRuleBasedTagger(),
+		storage,
+		ingest.WithSplitter(splitter.NewRecursive(splitter.Options{
+			ChunkSize: cfg.ChunkSize,
+			Overlap:   cfg.ChunkOverlap,
+		})),
+	)
 }
 
 func parseConfig(args []string) (config, error) {
@@ -134,6 +149,8 @@ func parseConfig(args []string) (config, error) {
 	cfg.ConnectionsFile = getenv("KB_TOOL_CONNECTIONS_FILE", "data/connections.json")
 	cfg.File.MaxBytes = getenvBytes("KB_TOOL_MAX_FILE_BYTES", source.DefaultMaxFileBytes)
 	cfg.File.MaxTextBytes = getenvBytes("KB_TOOL_MAX_TEXT_BYTES", source.DefaultMaxTextBytes)
+	cfg.ChunkSize = getenvInt("KB_TOOL_CHUNK_SIZE", 1024)
+	cfg.ChunkOverlap = getenvInt("KB_TOOL_CHUNK_OVERLAP", 128)
 
 	if len(args) == 0 {
 		return cfg, errors.New("command is required")
@@ -152,6 +169,8 @@ func parseConfig(args []string) (config, error) {
 	fs.StringVar(&cfg.AdminUser, "admin-user", cfg.AdminUser, "web admin username")
 	fs.StringVar(&cfg.AdminPassword, "admin-password", cfg.AdminPassword, "web admin password")
 	fs.StringVar(&cfg.ConnectionsFile, "connections-file", cfg.ConnectionsFile, "web database connection config file")
+	fs.IntVar(&cfg.ChunkSize, "chunk-size", cfg.ChunkSize, "text chunk size used before future embedding")
+	fs.IntVar(&cfg.ChunkOverlap, "chunk-overlap", cfg.ChunkOverlap, "text chunk overlap used before future embedding")
 	fs.Func("max-file-bytes", "maximum file size to collect, for example 512MiB or 536870912", func(value string) error {
 		parsed, err := parseBytes(value)
 		if err != nil {
@@ -277,7 +296,8 @@ Usage:
   kb-tool server [flags]
 
 TiDB flags can also be set with TIDB_HOST, TIDB_PORT, TIDB_USER, TIDB_PASSWORD, and TIDB_DATABASE.
-File limits can also be set with KB_TOOL_MAX_FILE_BYTES and KB_TOOL_MAX_TEXT_BYTES.`)
+File limits can also be set with KB_TOOL_MAX_FILE_BYTES and KB_TOOL_MAX_TEXT_BYTES.
+Chunking can also be set with KB_TOOL_CHUNK_SIZE and KB_TOOL_CHUNK_OVERLAP.`)
 }
 
 func bindsExternally(addr string) bool {

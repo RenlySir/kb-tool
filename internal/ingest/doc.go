@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/RenlySir/kb-tool/internal/source"
+	"github.com/RenlySir/kb-tool/internal/splitter"
 )
 
 type Tagger interface {
@@ -23,22 +24,44 @@ type Store interface {
 
 type TaggedDocument struct {
 	source.Document
-	Tags []string
+	Tags   []string
+	Chunks []splitter.Chunk
 }
 
 type Result struct {
 	Documents int
 	Tags      int
+	Chunks    int
 }
 
 type Service struct {
 	collector source.Collector
 	tagger    Tagger
+	splitter  splitter.Splitter
 	store     Store
 }
 
-func NewService(collector source.Collector, tagger Tagger, store Store) *Service {
-	return &Service{collector: collector, tagger: tagger, store: store}
+type Option func(*Service)
+
+func WithSplitter(textSplitter splitter.Splitter) Option {
+	return func(s *Service) {
+		if textSplitter != nil {
+			s.splitter = textSplitter
+		}
+	}
+}
+
+func NewService(collector source.Collector, tagger Tagger, store Store, options ...Option) *Service {
+	service := &Service{
+		collector: collector,
+		tagger:    tagger,
+		splitter:  splitter.NewRecursive(splitter.Options{}),
+		store:     store,
+	}
+	for _, option := range options {
+		option(service)
+	}
+	return service
 }
 
 func (s *Service) Ingest(ctx context.Context, input string) (Result, error) {
@@ -53,11 +76,13 @@ func (s *Service) Ingest(ctx context.Context, input string) (Result, error) {
 	result := Result{}
 	for _, doc := range docs {
 		tags := s.tagger.Tag(doc)
-		if err := s.store.Save(ctx, TaggedDocument{Document: doc, Tags: tags}); err != nil {
+		chunks := s.splitter.Split(doc.Content)
+		if err := s.store.Save(ctx, TaggedDocument{Document: doc, Tags: tags, Chunks: chunks}); err != nil {
 			return Result{}, err
 		}
 		result.Documents++
 		result.Tags += len(tags)
+		result.Chunks += len(chunks)
 	}
 	return result, nil
 }

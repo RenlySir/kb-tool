@@ -10,6 +10,7 @@ The current implementation is the first usable core. It is intentionally lightwe
 - Shallow-clone Git repositories with `git clone --depth 1`.
 - Skip binary files and noisy folders such as `.git`, `node_modules`, `vendor`, `dist`, `build`, and `target`.
 - Infer a simple language value from file extension.
+- Split extracted text into configurable chunks as the preparation step for later embedding and semantic retrieval.
 - Generate stable tags from language, path, title, and content keywords.
 - Create the TiDB schema automatically.
 - Upsert documents by `(content_hash, path_hash)` to avoid duplicates on repeated ingestion without creating oversized TiDB indexes for long paths.
@@ -24,7 +25,7 @@ Planned extensions are documented in [docs/operation-manual.md](docs/operation-m
 - Unstructured-based parsing for PDF, Word, PPT, Markdown, TXT, images, and video-derived text.
 - LangExtract-style structured metadata extraction for authors, dates, entities, and relations.
 - Manual tags, rule tags, and LLM-generated AI tags with review status, confidence, and evidence.
-- Chunking, embedding, and TiDB vector search.
+- Embedding and TiDB vector search on top of the current chunking boundary.
 - MinIO for raw object storage.
 - Dify Knowledge Pipeline and Airweave adapters.
 - MCP server for AI agents.
@@ -60,6 +61,13 @@ Ingest a local directory:
 
 ```bash
 ./kb-tool ingest ./docs
+```
+
+Tune chunking for later embedding:
+
+```bash
+KB_TOOL_CHUNK_SIZE=1024 KB_TOOL_CHUNK_OVERLAP=128 ./kb-tool ingest ./docs
+./kb-tool ingest -chunk-size 512 -chunk-overlap 64 ./docs
 ```
 
 Ingest a GitHub repository:
@@ -339,6 +347,8 @@ Input source
         ↓
 source collector
         ↓
+recursive text splitter
+        ↓
 rule-based tagger
         ↓
 ingest service
@@ -363,14 +373,15 @@ Main packages:
 
 - `cmd/kb-tool`: CLI parsing and command execution.
 - `internal/source`: local file collector, Git remote parser, and Git repository collector.
+- `internal/splitter`: Go-native recursive text splitter used before future embedding.
+- `internal/intelligence`: stable interfaces for external parser, tag-generation, and embedding services.
 - `internal/tagger`: deterministic rule-based tag generator.
-- `internal/ingest`: orchestration of collect, tag, migrate, and save.
+- `internal/ingest`: orchestration of collect, split, tag, migrate, and save.
 - `internal/store`: TiDB schema, upsert, tag linking, and search.
 - `internal/web`: Web UI static assets, REST API, batch ingest endpoint, document/tag API, and image asset endpoint.
 
 Planned packages:
 
-- `internal/llm`: provider abstraction for OpenAI-compatible APIs, Ollama, and internal model gateways.
 - `internal/aitagger`: prompt construction, JSON tag parsing, confidence/evidence handling, and review-state defaults.
 
 ## Development
@@ -396,7 +407,8 @@ gofmt -w cmd internal
 ## Current Limits
 
 - No PDF, old binary Office (`.doc`, `.xls`, `.ppt`), or video parsing yet.
-- No chunking or embedding yet.
+- Chunking is implemented as an in-process preparation step, but chunks are not persisted to a separate TiDB chunk table yet.
+- No embedding yet.
 - No TiDB vector search yet.
 - No MinIO object storage yet.
 - No MCP server yet.

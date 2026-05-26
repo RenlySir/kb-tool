@@ -91,3 +91,20 @@ func TestParseConfigReadsLargeFileOptionsFromEnv(t *testing.T) {
 		t.Fatalf("unexpected max text bytes: %d", cfg.File.MaxTextBytes)
 	}
 }
+
+func TestParseConfigSupportsSplitterOptions(t *testing.T) {
+	t.Setenv("KB_TOOL_CHUNK_SIZE", "256")
+	t.Setenv("KB_TOOL_CHUNK_OVERLAP", "32")
+
+	cfg, err := parseConfig([]string{"ingest", "-chunk-size", "128", "-chunk-overlap", "16", "./docs"})
+	if err != nil {
+		t.Fatalf("parseConfig returned error: %v", err)
+	}
+
+	if cfg.ChunkSize != 128 {
+		t.Fatalf("unexpected chunk size: %d", cfg.ChunkSize)
+	}
+	if cfg.ChunkOverlap != 16 {
+		t.Fatalf("unexpected chunk overlap: %d", cfg.ChunkOverlap)
+	}
+}
